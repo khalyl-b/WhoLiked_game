@@ -243,6 +243,60 @@ export class GameEngine implements GameService {
     return { voteCount, required, revealed: voteCount >= required };
   }
 
+  async reportUnavailableRound(code: string, actorUserId: string, roundId: string, videoId: string) {
+    const room = this.requireRoomByCode(code);
+    this.requireActivePlayer(room.id, actorUserId);
+    if (room.status !== "ACTIVE") return { replaced: false };
+    const round = this.currentRound(room);
+    if (!round || round.id !== roundId || round.status !== "ACTIVE") return { replaced: false };
+    const current = this.db.activities.get(round.activityId);
+    if (!current || current.videoId !== videoId) return { replaced: false };
+
+    // INVALID_VIDEO from TikTok's real Embed Player means this media ID cannot
+    // be served. Mark every copy of that post unavailable so it cannot be chosen
+    // again for another player.
+    for (const activity of this.db.activities.values()) {
+      if (activity.source === current.source && activity.videoId === current.videoId) activity.available = false;
+    }
+
+    const usedVideoIds = new Set(
+      this.roundsForGame(room.id, room.gameNumber)
+        .filter((item) => item.id !== round.id)
+        .map((item) => this.db.activities.get(item.activityId)?.videoId)
+        .filter((value): value is string => !!value),
+    );
+    const activeIds = new Set(this.activeRoomPlayers(room.id).map((player) => player.userId));
+    let pool = [...this.db.activities.values()].filter((activity) =>
+      activity.available
+      && activeIds.has(activity.userId)
+      && room.settings.activityTypes.includes(activity.activityType)
+      && !usedVideoIds.has(activity.videoId)
+      && activity.activityType === current.activityType
+    );
+    if (!pool.length) {
+      pool = [...this.db.activities.values()].filter((activity) =>
+        activity.available
+        && activeIds.has(activity.userId)
+        && room.settings.activityTypes.includes(activity.activityType)
+        && !usedVideoIds.has(activity.videoId)
+      );
+    }
+    if (!pool.length) throw new GameError("INSUFFICIENT_ACTIVITY", "No replacement TikTok is available for this round.", 409);
+
+    const preferred = pool.filter((activity) => activity.userId === round.sourceUserId);
+    const choices = preferred.length ? preferred : pool;
+    const replacement = choices[Math.floor(this.random() * choices.length)];
+    round.activityId = replacement.id;
+    round.sourceUserId = replacement.userId;
+    round.startedAt = this.now().toISOString();
+    round.answerDeadline = room.settings.guessDurationSeconds === 0
+      ? undefined
+      : new Date(this.now().getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
+    for (const [guessId, guess] of this.db.guesses) if (guess.roundId === round.id) this.db.guesses.delete(guessId);
+    this.db.roundEndVotes.delete(round.id);
+    return { replaced: true };
+  }
+
   async skipRound(code: string, actorUserId: string) {
     const room = this.requireRoomByCode(code);
     this.requireHost(room, actorUserId);

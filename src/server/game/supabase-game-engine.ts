@@ -16,7 +16,6 @@ import { FakeTikTokProvider } from "@/providers/social/fake-tiktok-provider";
 import type { SocialActivityProvider } from "@/providers/social/social-activity-provider";
 import { GameError } from "./errors";
 import type { GameService } from "./game-service";
-import { checkTikTokVideosWithConcurrency } from "@/server/social/tiktok-video-availability";
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const MAX_PLAYERS = 10;
@@ -316,38 +315,12 @@ export class SupabaseGameEngine implements GameService {
       );
     }
 
-    let candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, validation.distribution);
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      let availability: Map<string, "available" | "unavailable">;
-      try {
-        availability = await checkTikTokVideosWithConcurrency(candidates.map((candidate) => candidate.activity));
-      } catch (error) {
-        console.error("TikTok availability preflight failed", error);
-        throw new GameError("AVAILABILITY_CHECK_FAILED", "TikTok could not verify the selected videos right now. Try starting the game again in a moment.", 503);
-      }
-
-      const unavailableVideoIds = [...availability.entries()]
-        .filter(([, status]) => status === "unavailable")
-        .map(([videoId]) => videoId);
-      if (unavailableVideoIds.length === 0) break;
-
-      const { error: unavailableError } = await this.db()
-        .from("social_activity")
-        .update({ available: false })
-        .in("video_id", unavailableVideoIds);
-      if (unavailableError) throw this.databaseError(unavailableError, "Could not mark unavailable TikToks.");
-
-      const rejected = new Set(unavailableVideoIds);
-      for (const [userId, activities] of activityByUser) {
-        activityByUser.set(userId, activities.filter((activity) => !rejected.has(activity.videoId)));
-      }
-      const retryValidation = validateActivityCapacity(playerIds, room.settings.roundCount, activityByUser, this.random);
-      if (!retryValidation.ok) {
-        throw new GameError("INSUFFICIENT_ACTIVITY", "There are not enough currently available TikTok videos to start this game.", 409);
-      }
-      candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, retryValidation.distribution);
-      if (attempt === 7) throw new GameError("AVAILABILITY_CHECK_FAILED", "Too many selected TikTok videos are unavailable. Try again.", 409);
-    }
+    // Do not attempt to preflight Data Portability share URLs through TikTok's
+    // oEmbed endpoint here. Those exports do not include the creator username
+    // required by TikTok's canonical oEmbed URL format, which caused valid videos
+    // to be falsely marked unavailable. The real Embed Player now validates the
+    // selected post before it is shown; INVALID_VIDEO rounds are replaced in-place.
+    const candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, validation.distribution);
 
     const payload = candidates.map((candidate) => ({
       sourceUserId: candidate.ownerUserId,
@@ -379,6 +352,19 @@ export class SupabaseGameEngine implements GameService {
     const { data, error } = await this.db().rpc("vote_to_end_current_round", {
       p_room_id: room.id,
       p_actor_user_id: actorUserId,
+    });
+    if (error) throw this.rpcError(error);
+    return data;
+  }
+
+
+  async reportUnavailableRound(code: string, actorUserId: string, roundId: string, videoId: string) {
+    const room = await this.requireRoomByCode(code);
+    const { data, error } = await this.db().rpc("replace_unavailable_current_round", {
+      p_room_id: room.id,
+      p_actor_user_id: actorUserId,
+      p_round_id: roundId,
+      p_video_id: videoId,
     });
     if (error) throw this.rpcError(error);
     return data;

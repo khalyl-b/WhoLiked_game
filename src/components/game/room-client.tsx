@@ -26,6 +26,7 @@ export function RoomClient({ code }: { code: string }) {
   const { state, error, reconnecting, refresh } = useRoomState(code);
   const [busyAction, setBusyAction] = useState("");
   const [actionError, setActionError] = useState("");
+  const [readyVideoId, setReadyVideoId] = useState("");
 
   async function run(action: string, body?: unknown, after?: () => void) {
     setBusyAction(action); setActionError("");
@@ -75,26 +76,37 @@ export function RoomClient({ code }: { code: string }) {
           </div>
           <div className="mt-4"><Leaderboard players={state.players} compact /></div>
         </motion.section> : <motion.section key={`active-${round.id}`} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }}>
-          <VideoCard round={round} />
-          <h1 className="mt-6 text-center text-2xl font-black sm:text-3xl">{round.activity?.activityType === "REPOST" ? "Who reposted this?" : "Who liked this?"}</h1>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">{state.players.map((player) => {
-            const locked = !!state.viewerGuess;
-            const selected = state.viewerGuess === player.userId;
-            return <motion.button whileTap={{ scale: .98 }} key={player.userId} disabled={locked || !!busyAction} onClick={() => void run("guess", { guessedUserId: player.userId })} aria-pressed={selected} className={`focus-ring min-h-16 rounded-2xl border px-5 text-lg font-black transition ${selected ? "border-cyan-300 bg-cyan-300 text-black" : "border-white/10 bg-white/6 hover:bg-white/10"} disabled:cursor-not-allowed`}>{player.displayName}</motion.button>;
-          })}</div>
-          {state.viewerGuess && <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-4 text-center font-black text-cyan-300">Guess locked</motion.p>}
-          <div className="mt-5 flex flex-col items-center gap-2">
-            <Button
-              variant="secondary"
-              disabled={state.viewerVotedToEnd || !!busyAction}
-              onClick={() => void run("vote-end")}
-            >
-              {state.viewerVotedToEnd ? "Voted to end round" : "Vote to end round early"}
-            </Button>
-            <p className="text-xs text-zinc-500">
-              {state.endRoundVoteCount ?? 0}/{state.endRoundVotesRequired ?? (Math.floor(state.players.length / 2) + 1)} votes · more than 50% ends the round
-            </p>
-          </div>
+          <VideoCard
+            key={`${round.id}-${round.activity?.videoId ?? "missing"}`}
+            round={round}
+            replacing={busyAction === "unavailable"}
+            onReady={(videoId) => setReadyVideoId(videoId)}
+            onUnavailable={(roundId, videoId) => {
+              setReadyVideoId("");
+              void run("unavailable", { roundId, videoId });
+            }}
+          />
+          {readyVideoId === round.activity?.videoId ? <>
+            <h1 className="mt-6 text-center text-2xl font-black sm:text-3xl">{round.activity?.activityType === "REPOST" ? "Who reposted this?" : "Who liked this?"}</h1>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">{state.players.map((player) => {
+              const locked = !!state.viewerGuess;
+              const selected = state.viewerGuess === player.userId;
+              return <motion.button whileTap={{ scale: .98 }} key={player.userId} disabled={locked || !!busyAction} onClick={() => void run("guess", { guessedUserId: player.userId })} aria-pressed={selected} className={`focus-ring min-h-16 rounded-2xl border px-5 text-lg font-black transition ${selected ? "border-cyan-300 bg-cyan-300 text-black" : "border-white/10 bg-white/6 hover:bg-white/10"} disabled:cursor-not-allowed`}>{player.displayName}</motion.button>;
+            })}</div>
+            {state.viewerGuess && <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-4 text-center font-black text-cyan-300">Guess locked</motion.p>}
+            <div className="mt-5 flex flex-col items-center gap-2">
+              <Button
+                variant="secondary"
+                disabled={state.viewerVotedToEnd || !!busyAction}
+                onClick={() => void run("vote-end")}
+              >
+                {state.viewerVotedToEnd ? "Voted to end round" : "Vote to end round early"}
+              </Button>
+              <p className="text-xs text-zinc-500">
+                {state.endRoundVoteCount ?? 0}/{state.endRoundVotesRequired ?? (Math.floor(state.players.length / 2) + 1)} votes · more than 50% ends the round
+              </p>
+            </div>
+          </> : <p className="mt-4 text-center text-sm text-zinc-500">Checking that this TikTok is playable before guesses open…</p>}
         </motion.section>}
       </AnimatePresence>
       {host && state.room.status === "ACTIVE" && <div className="mt-6 flex justify-center gap-3"><Button variant="secondary" disabled={!!busyAction} onClick={() => void run("skip")}>Skip round</Button><Button variant="danger" disabled={!!busyAction} onClick={() => void run("end")}>End game</Button></div>}
