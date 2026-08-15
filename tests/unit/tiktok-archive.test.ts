@@ -46,6 +46,23 @@ describe("TikTok archive parsing", () => {
     expect(parsed[0].videoId).toBe("7400000000000000004");
   });
 
+
+  it("accepts TikTok export tiktokv.com Like List links", () => {
+    const parsed = parseTikTokJson({
+      "Likes and Favorites": {
+        "Like List": {
+          App: 1,
+          ItemFavoriteList: [
+            { date: "2026-08-15 15:18:34", link: "https://www.tiktokv.com/share/video/7673453822160801054/" },
+          ],
+        },
+      },
+    });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].videoId).toBe("7673453822160801054");
+    expect(parsed[0].videoUrl).toBe("https://www.tiktokv.com/share/video/7673453822160801054/");
+  });
+
   it("rejects non-TikTok links", () => {
     const parsed = parseTikTokLikeJsonValue([{ Link: "https://example.com/video/7400000000000000005" }]);
     expect(parsed).toEqual([]);

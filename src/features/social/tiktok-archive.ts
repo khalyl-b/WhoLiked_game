@@ -6,7 +6,7 @@ export interface ParsedTikTokLike {
   activityDate?: string;
 }
 
-const TIKTOK_URL_RE = /https?:\/\/(?:www\.)?tiktok\.com\/[A-Za-z0-9_@?&=./%-]+/gi;
+const TIKTOK_URL_RE = /https?:\/\/(?:[A-Za-z0-9-]+\.)?(?:tiktok\.com|tiktokv\.com)\/[A-Za-z0-9_@?&=./%-]+/gi;
 const VIDEO_ID_RE = /\/video\/(\d{6,})/i;
 
 function normaliseKey(value: string) {
@@ -45,7 +45,9 @@ export function normaliseTikTokUrl(raw: string): string | null {
   try {
     const url = new URL(cleaned);
     const host = url.hostname.toLowerCase();
-    if (host !== "tiktok.com" && !host.endsWith(".tiktok.com")) return null;
+    const isTikTokHost = host === "tiktok.com" || host.endsWith(".tiktok.com");
+    const isTikTokExportHost = host === "tiktokv.com" || host.endsWith(".tiktokv.com");
+    if (!isTikTokHost && !isTikTokExportHost) return null;
     url.hash = "";
     return url.toString();
   } catch {
