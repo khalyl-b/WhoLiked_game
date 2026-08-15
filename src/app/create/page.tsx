@@ -10,7 +10,7 @@ import { ensureBrowserIdentity } from "@/lib/supabase/identity-browser";
 export default function CreatePage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [roundCount, setRoundCount] = useState<5 | 10 | 15 | 20>(10);
+  const [roundCount, setRoundCount] = useState<10 | 20 | 30 | 50 | 100>(20);
   const [timer, setTimer] = useState<0 | 30 | 45 | 60 | 90>(60);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -38,7 +38,7 @@ export default function CreatePage() {
     <h1 className="mt-5 text-4xl font-black">Create game</h1>
     <form onSubmit={submit} className="panel mt-6 space-y-6 p-5 sm:p-7">
       <label className="block space-y-2"><span className="text-sm font-bold text-zinc-300">Your name</span><Input required maxLength={30} placeholder="James" value={name} onChange={(e) => setName(e.target.value)} autoComplete="nickname" /></label>
-      <ChoiceGrid label="Rounds" values={[5,10,15,20] as const} value={roundCount} onChange={setRoundCount} />
+      <ChoiceGrid label="Rounds" values={[10,20,30,50,100] as const} value={roundCount} onChange={setRoundCount} />
       <fieldset className="space-y-2"><legend className="text-sm font-bold text-zinc-300">Guess timer</legend>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{([30,45,60,90,0] as const).map((seconds) => <button key={seconds} type="button" onClick={() => setTimer(seconds)} aria-pressed={timer === seconds} className={`focus-ring min-h-12 rounded-xl border px-2 font-bold ${timer === seconds ? "border-cyan-300 bg-cyan-300 text-black" : "border-white/10 bg-white/5 text-white"}`}>{seconds === 0 ? "Unlimited" : `${seconds}s`}</button>)}</div>
         <p className="text-xs text-zinc-500">30 seconds minimum. Unlimited rounds end when everyone guesses or a majority votes to end early.</p>

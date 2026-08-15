@@ -202,7 +202,6 @@ export class GameEngine implements GameService {
     this.requireActivePlayer(room.id, guessedUserId);
     const round = this.currentRound(room);
     if (!round || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is not accepting guesses.", 409);
-    if (!round.startedAt) throw new GameError("ROUND_NOT_STARTED", "The timer has not started because the video is not playing for everyone yet.", 409);
     if (round.answerDeadline && this.now().getTime() >= new Date(round.answerDeadline).getTime()) {
       await this.tickRoom(room);
       throw new GameError("DEADLINE_PASSED", "The guess deadline has passed.", 409);
@@ -239,7 +238,6 @@ export class GameEngine implements GameService {
     this.requireActivePlayer(room.id, actorUserId);
     const round = this.currentRound(room);
     if (!round || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is no longer accepting votes.", 409);
-    if (!round.startedAt) throw new GameError("ROUND_NOT_STARTED", "Voting opens once the video is playing for everyone.", 409);
 
     const votes = this.db.roundEndVotes.get(round.id) ?? new Set<string>();
     votes.add(actorUserId);
@@ -250,33 +248,6 @@ export class GameEngine implements GameService {
     const required = Math.floor(players.length / 2) + 1;
     if (voteCount >= required) this.revealRound(room, round);
     return { voteCount, required, revealed: voteCount >= required };
-  }
-
-  async reportRoundPlaybackStarted(code: string, actorUserId: string, roundId: string, videoId: string) {
-    const room = this.requireRoomByCode(code);
-    this.requireActivePlayer(room.id, actorUserId);
-    if (room.status !== "ACTIVE") throw new GameError("INVALID_STATE", "There is no active round.", 409);
-    const round = this.currentRound(room);
-    if (!round || round.id !== roundId || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is no longer active.", 409);
-    const activity = this.db.activities.get(round.activityId);
-    if (!activity || activity.videoId !== videoId) throw new GameError("ROUND_NOT_FOUND", "That video is no longer the active round.", 409);
-
-    const starts = this.db.roundPlaybackStarts.get(round.id) ?? new Set<string>();
-    starts.add(actorUserId);
-    this.db.roundPlaybackStarts.set(round.id, starts);
-    const players = this.activeRoomPlayers(room.id);
-    const activeIds = new Set(players.map((player) => player.userId));
-    const readyCount = [...starts].filter((userId) => activeIds.has(userId)).length;
-
-    if (!round.startedAt && readyCount >= players.length) {
-      const started = this.now();
-      round.startedAt = started.toISOString();
-      round.answerDeadline = room.settings.guessDurationSeconds === 0
-        ? undefined
-        : new Date(started.getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
-    }
-
-    return { readyCount, required: players.length, started: !!round.startedAt };
   }
 
   async reportUnavailableRound(code: string, actorUserId: string, roundId: string, videoId: string) {
@@ -324,9 +295,11 @@ export class GameEngine implements GameService {
     const replacement = choices[Math.floor(this.random() * choices.length)];
     round.activityId = replacement.id;
     round.sourceUserId = replacement.userId;
-    round.startedAt = undefined;
-    round.answerDeadline = undefined;
-    this.db.roundPlaybackStarts.delete(round.id);
+    const replacementStarted = this.now();
+    round.startedAt = replacementStarted.toISOString();
+    round.answerDeadline = room.settings.guessDurationSeconds === 0
+      ? undefined
+      : new Date(replacementStarted.getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
     for (const [guessId, guess] of this.db.guesses) if (guess.roundId === round.id) this.db.guesses.delete(guessId);
     this.db.roundEndVotes.delete(round.id);
     return { replaced: true };
@@ -429,13 +402,15 @@ export class GameEngine implements GameService {
 
   private startRound(room: Room, round: Round) {
     round.status = "ACTIVE";
-    round.startedAt = undefined;
-    round.answerDeadline = undefined;
-    this.db.roundPlaybackStarts.delete(round.id);
+    const replacementStarted = this.now();
+    round.startedAt = replacementStarted.toISOString();
+    round.answerDeadline = room.settings.guessDurationSeconds === 0
+      ? undefined
+      : new Date(replacementStarted.getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
   }
 
   private validateSettings(settings: RoomSettings) {
-    if (![5, 10, 15, 20].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Invalid round count.");
+    if (![10, 20, 30, 50, 100].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Round count must be 10, 20, 30, 50, or 100.");
     if (![0, 30, 45, 60, 90].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Guess timer must be 30, 45, 60, 90 seconds or Unlimited.");
     if (!settings.activityTypes.length) throw new GameError("INVALID_SETTINGS", "Select at least one activity source.");
     if (settings.activityTypes.some((type) => !(["LIKE", "REPOST"] satisfies ActivityType[]).includes(type))) throw new GameError("INVALID_SETTINGS", "Invalid activity source.");

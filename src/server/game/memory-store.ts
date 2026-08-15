@@ -8,7 +8,6 @@ export interface MemoryDatabase {
   guesses: Map<string, Guess>;
   activities: Map<string, SocialActivity>;
   roundEndVotes: Map<string, Set<string>>;
-  roundPlaybackStarts: Map<string, Set<string>>;
 }
 
 function createDatabase(): MemoryDatabase {
@@ -20,7 +19,6 @@ function createDatabase(): MemoryDatabase {
     guesses: new Map(),
     activities: new Map(),
     roundEndVotes: new Map(),
-    roundPlaybackStarts: new Map(),
   };
 }
 

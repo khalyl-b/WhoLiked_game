@@ -184,8 +184,8 @@ export class SupabaseGameEngine implements GameService {
     let lobbyShortages: Array<{ userId: string; eligible: number; required: number }> = [];
     if (room.status === "LOBBY") {
       lobbyActivityCounts = await this.activityCountsByPlayer(players.map((player) => player.userId), room.settings.activityTypes);
-      // Under the current MVP limits (2-10 players, max 20 rounds), no player can
-      // own more than 10 rounds, and the product already requires at least 10 items.
+      // Lobby readiness keeps the existing 10-video floor; larger games are
+      // validated precisely when the host starts the game.
       lobbyShortages = players
         .map((player) => ({ userId: player.userId, eligible: lobbyActivityCounts.get(player.userId) ?? 0, required: 10 }))
         .filter((item) => item.eligible < item.required);
@@ -357,19 +357,6 @@ export class SupabaseGameEngine implements GameService {
     if (error) throw this.rpcError(error);
     return data;
   }
-
-  async reportRoundPlaybackStarted(code: string, actorUserId: string, roundId: string, videoId: string) {
-    const room = await this.requireRoomByCode(code);
-    const { data, error } = await this.db().rpc("report_round_playback_started", {
-      p_room_id: room.id,
-      p_actor_user_id: actorUserId,
-      p_round_id: roundId,
-      p_video_id: videoId,
-    });
-    if (error) throw this.rpcError(error);
-    return data;
-  }
-
 
   async reportUnavailableRound(code: string, actorUserId: string, roundId: string, videoId: string) {
     const room = await this.requireRoomByCode(code);
@@ -636,7 +623,7 @@ export class SupabaseGameEngine implements GameService {
   }
 
   private validateSettings(settings: RoomSettings) {
-    if (![5, 10, 15, 20].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Invalid round count.");
+    if (![10, 20, 30, 50, 100].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Round count must be 10, 20, 30, 50, or 100.");
     if (![0, 30, 45, 60, 90].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Guess timer must be 30, 45, 60, 90 seconds or Unlimited.");
     if (!settings.activityTypes.length) throw new GameError("INVALID_SETTINGS", "Select at least one activity source.");
     if (settings.activityTypes.some((type) => !("LIKE" === type || "REPOST" === type))) throw new GameError("INVALID_SETTINGS", "Invalid activity source.");
@@ -737,7 +724,7 @@ export class SupabaseGameEngine implements GameService {
 
   private rpcError(error: { message?: string; code?: string }) {
     const message = error.message ?? "Game operation failed.";
-    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET|ALREADY_VOTED|ROUND_NOT_STARTED)/)?.[1];
+    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET|ALREADY_VOTED)/)?.[1];
     const status = code === "ROOM_NOT_FOUND" || code === "ROUND_NOT_FOUND" ? 404
       : code === "NOT_IN_ROOM" || code === "HOST_ONLY" ? 403
       : 409;

@@ -21,7 +21,7 @@ describe("GameEngine multiplayer flow", () => {
   it("creates, joins, hides answers, rejects duplicate guesses, scores and rematches", async () => {
     let nowMs = Date.parse("2026-08-15T12:00:00.000Z");
     const engine = new GameEngine(getMemoryDatabase(), new FakeTikTokProvider(), () => new Date(nowMs), seededRandom());
-    const room = await engine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
+    const room = await engine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
     for (let index = 1; index < ids.length; index += 1) await engine.joinRoom(room.code, ids[index], names[index]);
 
     const lobby = await engine.getPublicState(room.code, ids[0]);
@@ -44,7 +44,7 @@ describe("GameEngine multiplayer flow", () => {
     expect(state.round?.correctUserIds).toContain(firstPrivateRound.sourceUserId);
     expect(state.players.every((player) => player.score === 1000)).toBe(true);
 
-    for (let roundNumber = 2; roundNumber <= 5; roundNumber += 1) {
+    for (let roundNumber = 2; roundNumber <= 10; roundNumber += 1) {
       nowMs += 4_100;
       state = await engine.getPublicState(room.code, ids[0]);
       expect(state.round?.roundNumber).toBe(roundNumber);
@@ -58,7 +58,7 @@ describe("GameEngine multiplayer flow", () => {
     nowMs += 4_100;
     state = await engine.getPublicState(room.code, ids[0]);
     expect(state.room.status).toBe("FINISHED");
-    expect(state.players.every((player) => player.score === 5000)).toBe(true);
+    expect(state.players.every((player) => player.score === 10000)).toBe(true);
 
     await engine.createRematch(room.code, ids[0]);
     state = await engine.getPublicState(room.code, ids[0]);
@@ -69,7 +69,7 @@ describe("GameEngine multiplayer flow", () => {
 
   it("transfers host when the host intentionally leaves the lobby", async () => {
     const engine = new GameEngine(getMemoryDatabase(), new FakeTikTokProvider(), () => new Date("2026-08-15T12:00:00.000Z"), seededRandom());
-    const room = await engine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
+    const room = await engine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
     await engine.joinRoom(room.code, ids[1], names[1]);
     await engine.leaveRoom(room.code, ids[0]);
     const state = await engine.getPublicState(room.code, ids[1]);
@@ -79,14 +79,14 @@ describe("GameEngine multiplayer flow", () => {
   it("enforces capacity and guess deadlines", async () => {
     let nowMs = Date.parse("2026-08-15T12:00:00.000Z");
     const engine = new GameEngine(getMemoryDatabase(), new FakeTikTokProvider(), () => new Date(nowMs), seededRandom(11));
-    const room = await engine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
+    const room = await engine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
     const extraIds = Array.from({ length: 10 }, (_, index) => `00000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`);
     for (let index = 0; index < 9; index += 1) await engine.joinRoom(room.code, extraIds[index], `Guest ${index}`);
     await expect(engine.joinRoom(room.code, extraIds[9], "Too many")).rejects.toMatchObject({ code: "ROOM_FULL" });
 
     resetMemoryDatabase();
     const deadlineEngine = new GameEngine(getMemoryDatabase(), new FakeTikTokProvider(), () => new Date(nowMs), seededRandom(12));
-    const deadlineRoom = await deadlineEngine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
+    const deadlineRoom = await deadlineEngine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
     await deadlineEngine.joinRoom(deadlineRoom.code, ids[1], names[1]);
     await deadlineEngine.startGame(deadlineRoom.code, ids[0]);
     const privateRound = [...getMemoryDatabase().rounds.values()].find((round) => round.roomId === deadlineRoom.id && round.roundNumber === 1)!;
@@ -116,7 +116,7 @@ describe("GameEngine multiplayer flow", () => {
     };
 
     const engine = new GameEngine(getMemoryDatabase(), provider, () => new Date("2026-08-15T12:00:00.000Z"), seededRandom(19));
-    const room = await engine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
+    const room = await engine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 30, activityTypes: ["LIKE"] });
     await engine.joinRoom(room.code, ids[1], names[1]);
     await engine.startGame(room.code, ids[0]);
 
@@ -134,7 +134,7 @@ describe("GameEngine multiplayer flow", () => {
 
   it("supports unlimited rounds and majority end-round voting", async () => {
     const engine = new GameEngine(getMemoryDatabase(), new FakeTikTokProvider(), () => new Date("2026-08-15T12:00:00.000Z"), seededRandom(31));
-    const room = await engine.createRoom(ids[0], names[0], { roundCount: 5, guessDurationSeconds: 0, activityTypes: ["LIKE"] });
+    const room = await engine.createRoom(ids[0], names[0], { roundCount: 10, guessDurationSeconds: 0, activityTypes: ["LIKE"] });
     await engine.joinRoom(room.code, ids[1], names[1]);
     await engine.joinRoom(room.code, ids[2], names[2]);
     await engine.startGame(room.code, ids[0]);
