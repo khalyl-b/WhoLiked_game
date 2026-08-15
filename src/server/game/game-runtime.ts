@@ -3,6 +3,7 @@ import { GameEngine } from "./game-engine";
 import { GameError } from "./errors";
 import type { GameService } from "./game-service";
 import { SupabaseGameEngine } from "./supabase-game-engine";
+import { createSocialActivityProvider } from "@/providers/social/provider-factory";
 
 let runtimeEngine: GameService | undefined;
 let runtimeStorage: string | undefined;
@@ -27,7 +28,8 @@ export function getGameEngine(): GameService {
   }
 
   if (!runtimeEngine || runtimeStorage !== storage) {
-    runtimeEngine = storage === "supabase" ? new SupabaseGameEngine() : new GameEngine();
+    const provider = createSocialActivityProvider();
+    runtimeEngine = storage === "supabase" ? new SupabaseGameEngine(provider) : new GameEngine(undefined, provider);
     runtimeStorage = storage;
   }
   return runtimeEngine;

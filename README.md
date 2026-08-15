@@ -1,107 +1,134 @@
 # Who Liked That?
 
-A mobile-first multiplayer party game where friends join a private room and guess which player owns the social activity shown in each round.
+A mobile-first multiplayer party game where friends join a private room and guess which player liked the TikTok shown in each round.
 
-The MVP deliberately uses fake TikTok activity first. TikTok is a connected social account, not the application's identity system, and gameplay consumes a `SocialActivityProvider` abstraction rather than TikTok-specific API responses.
+The multiplayer engine is server-authoritative and consumes a `SocialActivityProvider` abstraction. Development can use deterministic fake TikTok activity. Production can switch to user-imported TikTok Like List data without rewriting rooms, rounds, guessing, scoring or timers.
 
 ## Current implementation
 
+### Multiplayer
+
 - Next.js App Router, React and TypeScript.
-- Tailwind CSS 4 styling and Motion game transitions.
-- Six-character private room codes that exclude ambiguous characters.
+- Tailwind CSS 4 and Motion.
+- Six-character private room codes with ambiguous characters excluded.
 - 2 to 10 players.
 - 5, 10, 15 or 20 rounds.
 - 10, 15, 20 or 30 second server-authoritative deadlines.
-- Likes supported by the fake provider. Reposts represented in the domain model but disabled in the UI.
-- Fair round ownership distribution rather than pooling all player activity.
-- Duplicate-video exclusion when several players own the same video.
-- Unavailable-activity filtering and pre-game capacity validation.
+- Fair per-player round ownership distribution.
+- Duplicate-owner TikTok exclusion.
+- Unavailable activity filtering and pre-game capacity validation.
 - Host kick in lobby, skip, end game and deterministic host transfer on intentional leave.
-- Automatic answer reveal and next-round progression.
-- Final leaderboard and rematch using a new `gameNumber` so old guesses/rounds cannot mix with the rematch.
-- Production-safe Supabase PostgreSQL game persistence.
-- Atomic PostgreSQL RPCs for capacity, start, guess, reveal, timer progression, rematch and host actions.
-- Supabase Auth anonymous internal identities for deployed games.
-- Supabase Realtime invalidation with deadline-triggered refresh and low-frequency recovery polling.
-- Production guard that refuses `GAME_STORAGE=memory`.
-- `/api/health` endpoint that verifies production storage/schema connectivity.
-- TikTok Login Kit OAuth structure with CSRF state, server-side token handling, encrypted persistence, refresh and revoke/disconnect handling.
-- Delete-imported-data control.
-- Vitest unit/integration tests and Playwright multi-context E2E tests.
+- Automatic reveal, scoring and next-round progression.
+- Final leaderboard and clean rematch state.
+- Refresh-stable Supabase anonymous application identities.
+- Supabase Realtime invalidation plus recovery polling/deadline refreshes.
 
-## Deployment recommendation
+### Production persistence and security
 
-For personal/non-commercial testing, the simplest deployment is:
+- Supabase PostgreSQL for deployed rooms/game state.
+- Atomic PostgreSQL RPCs for concurrency-sensitive game operations.
+- RLS and server-only answer-sensitive rows.
+- Production refuses `GAME_STORAGE=memory`.
+- `/api/health` verifies the deployed database/schema connection.
+- Correct round owner is never included in ACTIVE-round public state.
 
-```text
-Vercel Hobby
-    |
-    v
-Supabase Free (Auth + Postgres + Realtime)
-```
+### TikTok
 
-No VPS, Oracle Cloud, DuckDNS or paid domain is required.
+- Official Login Kit OAuth flow with state/CSRF protection.
+- Server-side token exchange and refresh.
+- AES-256-GCM encrypted token persistence.
+- Revocation/disconnect handling.
+- TikTok Data Portability request/status/download architecture.
+- Signed TikTok webhook verification.
+- One-time `portability.all.single` design for the Full Archive because TikTok currently places Like List entries there.
+- ZIP/JSON Like List parser that ignores unrelated archive categories and Favourite Videos.
+- Real imported-activity persistence in `social_activity`.
+- Database-backed `TikTokProvider` behind the same `SocialActivityProvider` interface as fixtures.
+- Manual browser-local TikTok archive fallback while official Data Portability approval is pending.
+- Account readiness state, minimum-like feedback, data deletion and disconnect controls.
+- Privacy Policy, Terms of Service, visible legal footer and review UX route.
 
-See **[DEPLOY_FREE.md](./DEPLOY_FREE.md)** for the exact setup from an empty Supabase/Vercel account through four-player testing.
+## Important TikTok status
 
-## Important TikTok limitation
+TikTok Login Kit can be tested in Sandbox. TikTok's Data Portability API cannot be used in Sandbox and requires a Production/Staging app plus TikTok approval for the requested portability scope.
 
-TikTok Login Kit can connect a user's TikTok identity/profile. The ordinary Display API does not provide a normal consumer application's full liked-video/repost history.
+TikTok's current Data Types documentation lists **Likes and Favourites -> Like List -> Date / Video landing page link** under the **Full Archive**. The narrower Activity category lists other activity such as watch history, searches and share history, but not the Like List. This implementation therefore requests `portability.all.single` only when the user explicitly chooses a one-time likes import, extracts the Like List, and does not intentionally persist the raw full archive.
 
-TikTok currently documents **User Liked Videos** and **User Reposted Videos** under its Research API. That is a separately controlled product and must not be treated as a normal Login Kit permission. This repository therefore does not scrape TikTok, steal browser cookies, request passwords, or pretend that `video.list` represents the user's likes.
+No scraping, private endpoint reverse engineering, TikTok passwords or browser-cookie theft is used.
 
-Production gameplay remains on `FakeTikTokProvider` until a legitimate supported activity source is available.
+Official TikTok references:
 
-Official references:
-
-- Login Kit for Web: https://developers.tiktok.com/doc/login-kit-web/
-- OAuth user access tokens: https://developers.tiktok.com/doc/oauth-user-access-token-management
-- Display API: https://developers.tiktok.com/doc/display-api-overview
-- Research API liked videos: https://developers.tiktok.com/doc/research-api-specs-query-user-liked-videos
+- Data Portability Get Started: https://developers.tiktok.com/doc/data-portability-api-get-started
+- Add Data Request: https://developers.tiktok.com/doc/data-portability-api-add-data-request/
+- Download: https://developers.tiktok.com/doc/data-portability-api-download/
+- Data Types: https://developers.tiktok.com/doc/data-portability-data-types
+- Webhook Events: https://developers.tiktok.com/doc/webhooks-events
+- Webhook Verification: https://developers.tiktok.com/doc/webhooks-verification
+- App Review Guidelines: https://developers.tiktok.com/doc/app-review-guidelines/
 
 ## Architecture
 
 ```text
 Browser
-  |  player intents
+  | player intents
   v
 Next.js route handlers on Vercel
   |
   v
 GameService
-  |-- GameEngine           -> local memory mode only
-  |-- SupabaseGameEngine   -> deployed persistent mode
+  |-- GameEngine           -> local memory development
+  |-- SupabaseGameEngine   -> deployed persistent game
   |
   +-- SocialActivityProvider
        |-- FakeTikTokProvider
-       +-- TikTokProvider boundary
+       +-- TikTokProvider -> imported public.social_activity rows
 
-Production persistence
-  |
-  +-- Supabase Auth anonymous identity
-  +-- PostgreSQL rooms / players / rounds / guesses
-  +-- atomic server-only RPCs
-  +-- Realtime on safe room/player rows
+TikTok production data path
+  Login Kit / Data Portability OAuth
+        |
+        v
+  TikTok portability request
+        |
+        v
+  signed webhook or status poll
+        |
+        v
+  ZIP download -> Like List parser
+        |
+        v
+  public.social_activity
+        |
+        v
+  existing game engine
 ```
 
-The correct owner is never included in the ACTIVE-round public response. `sourceUserId`, correctness and result details appear only after the database has legally moved the round to REVEAL.
+See:
 
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for design details.
+- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- [docs/TIKTOK_DATA_FLOW.md](./docs/TIKTOK_DATA_FLOW.md)
+- [TIKTOK_NEXT_STEPS.md](./TIKTOK_NEXT_STEPS.md)
+- [TIKTOK_REVIEW_APPLICATION.md](./TIKTOK_REVIEW_APPLICATION.md)
 
 ## Project structure
 
 ```text
 src/
   app/
+    account/
+    create/
+    join/
+    privacy/
+    review/tiktok-portability/
+    room/[code]/
+    terms/
+    tiktok-import/
     api/
       account/
       auth/tiktok/
       health/
       rooms/
-    account/
-    create/
-    join/
-    room/[code]/
+      tiktok/
+      webhooks/tiktok/
   components/
   features/
   lib/supabase/
@@ -122,159 +149,157 @@ tests/
   e2e/
 ```
 
-## Local setup without Supabase
+## Environment variables
 
-### Requirements
+Copy `.env.example` to `.env.local` for local development.
 
-- Node.js 22 or later.
-- npm.
-
-### Install
-
-```bash
-npm install
-```
-
-### Environment
-
-```bash
-cp .env.example .env.local
-```
-
-For a zero-credential local game:
+### Core
 
 ```env
 GAME_STORAGE=memory
-SESSION_SECRET=replace-with-a-long-random-secret
+SESSION_SECRET=<strong random secret>
+SOCIAL_ACTIVITY_PROVIDER=fake
 ```
 
-Do not commit `.env.local` or real secrets.
+`SOCIAL_ACTIVITY_PROVIDER` accepts:
 
-### Run
+- `fake` - deterministic fixture activity.
+- `tiktok` - real imported TikTok activity only. Fixture rows are excluded/removed from the real game pool.
 
-```bash
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-Memory mode is for local development only. Production deliberately throws an error if it is selected.
-
-## Local/deployed Supabase mode
-
-Create a Supabase project and run `supabase/bootstrap.sql` in a **new project's** SQL editor, or apply these migrations in order using your normal migration tooling:
-
-```text
-supabase/migrations/0001_initial_schema.sql
-supabase/migrations/0002_server_guards.sql
-supabase/migrations/0003_serverless_runtime.sql
-```
-
-Enable Supabase **Anonymous Sign-Ins**.
-
-Configure:
+Production must use:
 
 ```env
 GAME_STORAGE=supabase
-SESSION_SECRET=<strong random secret>
-NEXT_PUBLIC_SUPABASE_URL=<project URL>
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable_...>
-SUPABASE_SECRET_KEY=<sb_secret_...>
 ```
 
-Legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` values are accepted as fallbacks, but the current publishable/secret key format is preferred.
+### Supabase
 
-The secret/server key must never be exposed to browser code or prefixed with `NEXT_PUBLIC_`.
-
-### Health check
-
-With the app running in Supabase mode, open:
-
-```text
-/api/health
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 ```
 
-A healthy deployed runtime returns:
+Legacy anon/service-role names remain accepted as fallbacks.
 
-```json
-{
-  "ok": true,
-  "storage": "supabase",
-  "database": true
-}
-```
-
-## Database security
-
-The schema contains:
-
-- `users`
-- `social_accounts`
-- private encrypted token storage
-- `social_activity`
-- `rooms`
-- `room_players`
-- `rounds`
-- `guesses`
-
-`rounds` and `guesses` intentionally have no direct browser SELECT policy because they contain answer-sensitive data.
-
-Browser Realtime watches only `rooms` and `room_players`. Realtime changes trigger a sanitised server refetch rather than broadcasting the correct answer.
-
-Critical state transitions are PostgreSQL RPCs protected with row locking and database constraints. Serverless instances do not need to share process memory.
-
-## Fake provider
-
-`src/providers/social/fake-tiktok-provider.ts` returns deterministic fixture activity and includes:
-
-- unique likes
-- a duplicate video owned by every fixture user
-- unavailable activity
-- varying creators/titles
-
-The shared duplicate is expected to be removed before round generation.
-
-The provider interface is:
-
-```ts
-interface SocialActivityProvider {
-  getLikes(userId: string): Promise<SocialActivity[]>;
-  getReposts(userId: string): Promise<SocialActivity[]>;
-}
-```
-
-The game engine does not call TikTok endpoints directly.
-
-## TikTok Login Kit setup
-
-TikTok is optional for the current playable fake-data MVP.
-
-When approved credentials exist, configure:
+### TikTok
 
 ```env
 TIKTOK_CLIENT_KEY=
 TIKTOK_CLIENT_SECRET=
-TIKTOK_REDIRECT_URI=https://your-exact-registered-domain.example/api/auth/tiktok/callback
-TIKTOK_TOKEN_ENCRYPTION_KEY=<independent strong random secret>
+TIKTOK_REDIRECT_URI=https://your-domain.example/api/auth/tiktok/callback
+TIKTOK_TOKEN_ENCRYPTION_KEY=<separate strong random secret>
 ```
 
-If `TIKTOK_TOKEN_ENCRYPTION_KEY` is omitted, `SESSION_SECRET` is used as a backwards-compatible encryption-key fallback.
+### Public legal details
 
-The OAuth flow:
+```env
+NEXT_PUBLIC_OPERATOR_NAME=
+NEXT_PUBLIC_SUPPORT_EMAIL=
+```
 
-1. Creates a cryptographically random state value.
-2. Stores the state in an HTTP-only cookie tied to the internal user.
-3. Redirects to TikTok's official authorisation endpoint.
-4. Validates state on callback.
-5. Exchanges the code server-side.
-6. Fetches basic profile data.
-7. Encrypts tokens with AES-256-GCM before persistence.
-8. Refreshes access tokens server-side.
-9. Revokes and removes the local connection on disconnect where possible.
+These values appear on the Privacy/Terms pages and should contain genuine public operator/contact details before TikTok production review.
+
+## Database setup
+
+For a brand-new Supabase project, run:
+
+```text
+supabase/bootstrap.sql
+```
+
+For the existing deployed project that already has migrations 0001 to 0003, apply only:
+
+```text
+supabase/migrations/0004_tiktok_portability.sql
+```
+
+Migration 0004 adds:
+
+- activity origin tracking so fixtures cannot masquerade as imported likes
+- `tiktok_portability_requests`
+- request RLS/indexes
+- server-only idempotent TikTok activity import RPC
+- server-only TikTok data deletion RPC
+
+Enable Supabase Anonymous Sign-Ins for the application's stable internal identities.
+
+## Local development without Supabase
+
+Requirements:
+
+- Node.js 22+
+- npm
+
+Install/run:
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Use:
+
+```env
+GAME_STORAGE=memory
+SOCIAL_ACTIVITY_PROVIDER=fake
+SESSION_SECRET=<strong development secret>
+```
+
+Open `http://localhost:3000`.
+
+Memory mode is deliberately blocked in production.
+
+## Production deployment
+
+The personal/non-commercial test deployment is designed for Vercel + Supabase. See [DEPLOY_FREE.md](./DEPLOY_FREE.md).
+
+For the already-deployed site, follow [TIKTOK_NEXT_STEPS.md](./TIKTOK_NEXT_STEPS.md) for the portability migration, Vercel environment variables and TikTok production portal configuration.
+
+## TikTok manual archive fallback
+
+Until Data Portability is approved, users can test with genuine Like List data:
+
+1. Obtain their own TikTok data archive.
+2. Open `/account`.
+3. Choose ZIP/JSON/TXT under Manual archive fallback.
+4. JSZip parses the archive in the browser.
+5. Only extracted Like List records are submitted to the server.
+6. The server validates TikTok URLs again and derives stable IDs itself.
+7. Imported activity is written idempotently into Supabase.
+
+The raw manual archive is not uploaded by this implementation.
+
+## Official Data Portability flow
+
+Once TikTok approves the required production scope:
+
+1. User connects TikTok.
+2. User opens `/tiktok-import`.
+3. The app clearly explains the one-time full-archive transfer and retained data.
+4. User authorises `portability.all.single`.
+5. Server creates an `all_data` request.
+6. Status polling and/or a verified `portability.download.ready` webhook marks it ready.
+7. Server downloads the ZIP.
+8. Parser extracts Like List entries only.
+9. Normalised likes are stored in `social_activity`.
+10. `TikTokProvider` exposes them to the unchanged game engine.
+
+Automatic server import currently places a 100 MB safety cap on the archive buffer. Larger archives are directed to the browser-local manual fallback instead of risking excessive server memory.
+
+## Privacy controls
+
+`/account` provides:
+
+- Disconnect TikTok - revoke/remove the connection while retaining already imported activity.
+- Delete my TikTok data - revoke where possible and remove the TikTok connection, encrypted token row, imported activity and portability request records.
+
+A valid TikTok `authorization.removed` webhook also triggers TikTok-derived data cleanup.
 
 ## Tests
 
-Run:
+When dependencies are installed:
 
 ```bash
 npm run typecheck
@@ -284,22 +309,17 @@ npm run build
 npm run test:e2e
 ```
 
-Unit coverage includes fair allocation, owner scheduling, duplicate exclusion, insufficient activity and no activity reuse.
+Coverage includes:
 
-Integration coverage exercises room creation/joining, answer hiding, duplicate-guess rejection, deadline enforcement, scoring, progression, completion, rematch and host transfer.
+- fair ownership allocation
+- duplicate-video exclusion
+- insufficient activity
+- room/game/scoring/rematch behaviour
+- TikTok Like List parsing and exclusion of unrelated/favourite data
+- webhook signature validation and replay-window rejection
+- portability status mapping
+- server re-derivation of TikTok video IDs instead of trusting client IDs
+- provider switching without changing the game-service interface
+- multi-context Playwright multiplayer flow
 
-Playwright exercises independent browser contexts for multiplayer behaviour.
-
-## Manual four-player test
-
-Use four independent browser profiles/devices so each gets a different application identity.
-
-1. James creates a five-round room.
-2. Ahmed, Sam and Ryan join with the room code.
-3. Verify everyone appears without refreshing.
-4. Start the game.
-5. Submit guesses from all four players.
-6. Verify the same answer reveal and scores everywhere.
-7. Continue to the final leaderboard.
-8. Play again and verify scores reset without re-entering the code.
-9. Refresh one participant during lobby/round/reveal and verify they rejoin as the same user.
+See [BUILD_STATUS.md](./BUILD_STATUS.md) for what was actually executable in the current build environment and what still requires Vercel/a normal networked machine.

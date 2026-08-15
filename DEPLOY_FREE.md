@@ -29,7 +29,7 @@ You need free accounts for:
 2. Supabase
 3. Vercel
 
-TikTok developer credentials are **not** required to play the current fake-data MVP.
+TikTok developer credentials are **not** required to play the fixture-data multiplayer mode. Real likes import is a separate production integration described in `TIKTOK_NEXT_STEPS.md`.
 
 ---
 
@@ -125,7 +125,7 @@ In the same Supabase project:
 5. Click **Run**.
 6. Confirm there is no SQL error.
 
-`bootstrap.sql` contains migrations `0001`, `0002` and `0003` in order. Use it on a new project so you only need one paste.
+`bootstrap.sql` contains migrations `0001` through `0004` in order. Use it only on a new project so you only need one paste. If your existing deployment already ran 0001 to 0003, run only `supabase/migrations/0004_tiktok_portability.sql`.
 
 It creates the database tables, constraints, RLS rules, Realtime publication and server-only atomic game functions.
 
@@ -358,19 +358,14 @@ Supabase Free projects can also be paused after a period of inactivity. If a dor
 
 ---
 
-## Future TikTok OAuth setup
+## TikTok likes integration after the base deployment
 
-Do not configure TikTok just to test the multiplayer MVP. The fake provider is intentional.
+Login Kit and the new Data Portability/import code are documented separately because TikTok production configuration and scope approval are required.
 
-When you later obtain approved TikTok credentials, set:
+Follow:
 
 ```text
-TIKTOK_CLIENT_KEY=...
-TIKTOK_CLIENT_SECRET=...
-TIKTOK_REDIRECT_URI=https://YOUR-VERCEL-URL.vercel.app/api/auth/tiktok/callback
-TIKTOK_TOKEN_ENCRYPTION_KEY=<another random 48-byte secret>
+TIKTOK_NEXT_STEPS.md
 ```
 
-Register that exact HTTPS callback URI in TikTok's developer console.
-
-Connecting TikTok still must not be presented as access to liked/reposted video history unless TikTok has officially granted the required API capability.
+The deployment remains the same Vercel + Supabase architecture. The additional steps are the migration `0004_tiktok_portability.sql`, legal/operator environment variables, TikTok Webhooks/Data Portability configuration, URL verification, and eventual switch to `SOCIAL_ACTIVITY_PROVIDER=tiktok`.

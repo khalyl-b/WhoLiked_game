@@ -47,6 +47,10 @@ function useSupabasePersistence() {
   return hasSupabaseServerConfig();
 }
 
+export function parseTikTokScopes(raw: string) {
+  return raw.split(/[,\s]+/).map((scope) => scope.trim()).filter(Boolean);
+}
+
 function encryptionKey() {
   const secret = process.env.TIKTOK_TOKEN_ENCRYPTION_KEY || process.env.SESSION_SECRET;
   if (!secret && process.env.NODE_ENV === "production") throw new Error("TIKTOK_TOKEN_ENCRYPTION_KEY or SESSION_SECRET is required for token encryption in production.");
@@ -212,7 +216,7 @@ export async function refreshTikTokAccess(connection: TikTokConnection) {
   const updated: TikTokConnection = {
     ...connection,
     openId: typeof data.open_id === "string" ? data.open_id : connection.openId,
-    scopes: typeof data.scope === "string" ? data.scope.split(",").filter(Boolean) : connection.scopes,
+    scopes: typeof data.scope === "string" ? parseTikTokScopes(data.scope) : connection.scopes,
     accessTokenEncrypted: encryptSecret(data.access_token),
     refreshTokenEncrypted: encryptSecret(data.refresh_token),
     accessTokenExpiresAt: new Date(now + Number(data.expires_in ?? 86400) * 1000).toISOString(),

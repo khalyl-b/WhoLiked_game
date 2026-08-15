@@ -2,23 +2,44 @@
 
 Date: 2026-08-15
 
-## Deployment-critical fixes completed
+## TikTok data-import stage completed in code
 
-- Replaced process-local production game state with `SupabaseGameEngine` persistence.
-- Added a storage-independent `GameService` boundary so local memory mode and deployed Supabase mode share the same API routes.
-- Production now refuses `GAME_STORAGE=memory`, preventing accidental deployment with volatile Vercel function RAM.
-- Added atomic PostgreSQL RPCs with row locks for join capacity, game start, guesses, reveal/scoring, clock advancement, rematch, leave, kick, skip and end-game operations.
-- Added Supabase Auth anonymous identities for deployed players so refresh/reconnect is tied to a persistent internal user.
-- Browser now creates the anonymous identity before create/join actions, avoiding unnecessary concentration of anonymous signup traffic through the Vercel server path.
-- Added persistent encrypted TikTok social-account/token storage instead of a production global `Map`.
-- Added current Supabase publishable/secret key support with legacy key fallbacks.
-- Reduced continuous room polling from roughly once per second to Supabase Realtime plus deadline-specific refreshes and a 10-second recovery poll.
-- Added `/api/health` to verify that production is using Supabase and can see the game schema.
-- Added `supabase/bootstrap.sql` for one-paste setup of a new Supabase project.
-- Added a dedicated optional `TIKTOK_TOKEN_ENCRYPTION_KEY`, with `SESSION_SECRET` retained as a fallback.
-- Added `DEPLOY_FREE.md` with the £0 Vercel Hobby + Supabase Free deployment path.
+- Added public `/privacy` and `/terms` pages aligned with the implemented TikTok/Supabase data flow.
+- Added always-visible legal/account footer navigation.
+- Added `/tiktok-import` as the consent/explanation screen before the Data Portability authorisation flow.
+- Added `/review/tiktok-portability` to make the required review screenshots straightforward to capture.
+- Added a real `TikTokProvider` that consumes imported activity through the existing `SocialActivityProvider` interface.
+- Added `SOCIAL_ACTIVITY_PROVIDER=fake|tiktok` switching without changing the multiplayer game engine.
+- Added explicit `import_source` tracking so fake fixture activity cannot be counted as real activity after switching to the TikTok provider.
+- Added server-side TikTok Data Portability request, status, download and import services.
+- Added the Data Portability OAuth entry route requesting `portability.all.single` for a one-time transfer.
+- Added a signed `/api/webhooks/tiktok` endpoint with timestamped HMAC-SHA256 verification against the exact raw body.
+- Added handling for `portability.download.ready` and `authorization.removed` webhook events.
+- Added ZIP parsing for TikTok's Like List. Favourite Videos and unrelated archive categories are deliberately not interpreted as likes.
+- Added server-side TikTok URL validation, stable video-ID derivation and deduplication before database import.
+- Added a 100 MB automatic archive safety limit and retry-safe import claiming.
+- Added account activity-readiness UI, portability status/progress, import action and useful insufficient-activity messaging.
+- Updated the round media card so real imported TikTok video IDs render through TikTok's official web player, while fixture rounds retain the development card and non-embeddable links have a safe fallback.
+- Added a manual archive fallback. The browser parses the user's own TikTok ZIP/JSON/TXT file and only extracted Like List records are sent to the server.
+- Added real imported-data deletion and disconnect/cancel/revoke behaviour.
+- Added migration `0004_tiktok_portability.sql` for portability request tracking, import-source provenance, indexes, RLS, Realtime and privileged import/delete RPCs.
+- Rebuilt `supabase/bootstrap.sql` so brand-new databases receive migrations 0001 through 0004 in one run.
+- Added `TIKTOK_NEXT_STEPS.md`, `TIKTOK_REVIEW_APPLICATION.md` and `docs/TIKTOK_DATA_FLOW.md`.
+- Added unit tests for archive parsing, webhook signatures, status validation, URL-derived IDs/deduplication and provider switching.
 
-## Core implementation already present
+## Deployment-critical fixes retained
+
+- Production game state uses `SupabaseGameEngine`, not Vercel function RAM.
+- `GameService` keeps local memory and production Supabase runtimes behind the same API surface.
+- Production refuses `GAME_STORAGE=memory`.
+- Race-sensitive game mutations use PostgreSQL RPCs/locks.
+- Supabase anonymous users provide stable internal identities across refresh/reconnect.
+- Browser Realtime uses safe room/player rows and refetches sanitised state.
+- OAuth tokens are encrypted before storage.
+- Current Supabase publishable/secret keys are supported, with legacy fallbacks.
+- `/api/health` checks production storage/database connectivity.
+
+## Core multiplayer implementation
 
 - Next.js App Router project structure and mobile-first game UI.
 - Create/join/lobby/game/reveal/leaderboard/rematch flow.
@@ -27,34 +48,25 @@ Date: 2026-08-15
 - Minimum eligible activity validation.
 - Server-side deadline/host/membership/guess validation.
 - Automatic reveal, scoring and progression.
-- Fake TikTok provider behind `SocialActivityProvider`.
+- Fake and real TikTok activity providers behind `SocialActivityProvider`.
 - RLS, indexes, foreign keys and unique constraints.
-- TikTok Login Kit OAuth structure with CSRF state, token exchange, refresh and revoke handling.
+- TikTok Login Kit OAuth with CSRF state, token exchange, refresh and revoke handling.
 - Unit, integration and four-context Playwright test suites.
 
-## Verification actually executed in this environment
+## Verification executed in this environment
 
-Passed earlier in this build session:
+Passed in this build session:
 
-1. Pure TypeScript game-logic compilation.
-2. Fair round-allocation smoke check.
-3. Duplicate-video exclusion smoke check.
-4. Compiled four-player, five-round authoritative memory-engine smoke test.
-5. Pre-reveal answer-hiding smoke check.
-6. Score/reveal/final/rematch smoke check.
-7. Room-capacity smoke check.
-8. Duplicate-guess rejection smoke check.
-9. Deadline-rejection/deadline-triggered reveal smoke check.
-10. Temporary dependency-stub project TypeScript validation for the modified server/API surface.
-11. Syntax checks over non-TSX TypeScript files.
+1. TypeScript parser sweep over all current TS/TSX source and tests: 70 files, zero syntax diagnostics.
+2. Strict selective TypeScript validation of the new TikTok archive, portability, OAuth and provider modules using temporary dependency declarations because npm packages are unavailable in this container.
+3. Runtime TikTok archive smoke test using a real JSZip installation already present elsewhere in the container. It verified that Like List records are extracted from a combined Likes and Favourites archive while Favourite Videos and Watch History are excluded.
+4. Earlier compiled authoritative memory-engine smoke tests covering fair allocation, duplicate-video exclusion, four-player five-round flow, pre-reveal answer hiding, scoring, finish/rematch, capacity, duplicate-guess rejection and deadline enforcement.
+5. Basic SQL structural checks on migration 0004 and the rebuilt bootstrap, including balanced function dollar quotes and parentheses.
+6. ZIP integrity/package checks will be repeated on the final handoff archive.
 
-After the Supabase/serverless refactor, source-level/static checks were repeated where package-independent. See the final handoff response for the exact commands/results.
+## External validation still required
 
-## Environment limitation
-
-This execution container cannot currently complete `npm install` from the public npm registry, so real package-backed checks cannot honestly be reported as passed here.
-
-The following still must be run in a normal connected development machine or by Vercel's build environment:
+This execution container cannot currently complete `npm install` from the public npm registry. Therefore these package-backed or account-backed checks must not be represented as passed here:
 
 - `npm install`
 - `npm run typecheck` against the real dependency typings
@@ -62,7 +74,8 @@ The following still must be run in a normal connected development machine or by 
 - `npm run test`
 - `npm run build`
 - Playwright browser E2E
-- the SQL migrations against a real Supabase Free project
-- live Supabase Realtime testing across independent clients
+- migration 0004 against the user's live Supabase project
+- live Data Portability API calls, which require TikTok production approval and cannot be exercised in Sandbox
+- live webhook delivery from TikTok
 
-`DEPLOY_FREE.md` includes a `/api/health` test and a four-player manual verification sequence specifically so these remaining external-environment checks are explicit rather than assumed.
+The handoff docs contain the exact migration, environment-variable and portal steps required for those external checks.

@@ -57,8 +57,51 @@ The database revalidates the selected player set, activity ownership, availabili
 
 ## 7. TikTok integration boundary
 
-`SocialActivityProvider` is the only activity-acquisition interface consumed by the game domain. `FakeTikTokProvider` is fully functional now. `TikTokProvider` remains disabled until legitimate TikTok API access can return the required activity type.
+`SocialActivityProvider` is the only activity-acquisition interface consumed by the game domain. Provider selection is controlled by `SOCIAL_ACTIVITY_PROVIDER`:
 
-TikTok Login Kit is a separate account connection. Tokens are encrypted before persistence and stored behind a private-schema table accessed only through server-authorised RPCs. A dedicated `TIKTOK_TOKEN_ENCRYPTION_KEY` can be used; `SESSION_SECRET` is only a fallback.
+- `fake` uses `FakeTikTokProvider` for fixture gameplay.
+- `tiktok` uses `TikTokProvider`, which reads imported TikTok activity from `social_activity`.
 
-Login success must never be interpreted as access to likes or reposts when TikTok has not granted such an API capability.
+The game engine does not know how activity was acquired. This keeps rooms, rounds, guessing, scoring and timers unchanged when the activity source changes.
+
+Fixture rows are marked with `import_source = 'fixture'`. In real TikTok mode they are excluded from readiness counts and gameplay, preventing fake fixture likes from being mixed with imported user data.
+
+## 8. TikTok Login Kit and Data Portability
+
+Login Kit establishes the connected TikTok identity. It is not treated as permission to read likes.
+
+For liked-video import, the production path uses TikTok Data Portability when the app receives the required scope. A one-time portability authorisation requests `portability.all.single`, creates an `all_data` export request and tracks the request in `tiktok_portability_requests`.
+
+The server:
+
+1. creates the portability request;
+2. checks the request status;
+3. accepts a signed `portability.download.ready` webhook;
+4. downloads the resulting ZIP only after TikTok reports it ready;
+5. extracts the Like List;
+6. normalises TikTok video URLs into stable internal activity rows;
+7. stores only the activity required by the game.
+
+The complete downloaded archive is processed transiently and is not intentionally persisted by the application.
+
+## 9. TikTok webhook security
+
+`/api/webhooks/tiktok` verifies TikTok's HMAC-SHA256 signature against the exact raw request body and timestamp using `TIKTOK_CLIENT_SECRET`. Old signatures outside the configured tolerance are rejected.
+
+The webhook does not perform the potentially long archive download inline. It records the ready state so the authenticated account flow can claim and import the archive safely.
+
+The `authorization.removed` event removes the associated stored TikTok connection/data through the server-side deletion path.
+
+## 10. Token storage and data deletion
+
+TikTok OAuth tokens are encrypted with AES-GCM before persistence. `TIKTOK_TOKEN_ENCRYPTION_KEY` is preferred; `SESSION_SECRET` is retained only as a fallback for development/backwards compatibility.
+
+Disconnecting TikTok revokes the token and removes the connected-account record but deliberately keeps already imported activity so a user does not unexpectedly lose a current game. The separate Delete TikTok Data action removes imported TikTok activity, portability request records and the connected account.
+
+## 11. Manual archive fallback
+
+While Data Portability production approval is pending, a user can import their own TikTok archive through `/account`.
+
+The ZIP/JSON/text parsing happens in the browser. Only extracted Like List records are sent to the server. The server independently validates each TikTok URL, derives its own stable video identifier, deduplicates records and writes them using the same `social_activity` model consumed by `TikTokProvider`.
+
+This fallback is intentionally not scraping. It operates only on a file the user obtained from TikTok and explicitly chose to upload.

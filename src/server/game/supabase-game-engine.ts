@@ -68,6 +68,7 @@ interface ActivityRow {
   imported_at: string;
   available: boolean;
   metadata: Record<string, unknown> | null;
+  import_source?: string;
 }
 
 interface RoundRow {
@@ -352,10 +353,25 @@ export class SupabaseGameEngine implements GameService {
 
   private async ensureProviderActivity(userId: string) {
     const db = this.db();
-    const { count, error: countError } = await db
+    const providerMode = (process.env.SOCIAL_ACTIVITY_PROVIDER ?? "fake").toLowerCase();
+
+    // Fixture records are deliberately removed when production switches to the real
+    // TikTok provider so test likes can never leak into a real user's game pool.
+    if (providerMode === "tiktok") {
+      const { error: fixtureDeleteError } = await db
+        .from("social_activity")
+        .delete()
+        .eq("user_id", userId)
+        .eq("import_source", "fixture");
+      if (fixtureDeleteError) throw this.databaseError(fixtureDeleteError, "Could not remove development activity.");
+    }
+
+    let countQuery = db
       .from("social_activity")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId);
+    if (providerMode === "tiktok") countQuery = countQuery.neq("import_source", "fixture");
+    const { count, error: countError } = await countQuery;
     if (countError) throw this.databaseError(countError, "Could not inspect activity.");
     if ((count ?? 0) > 0) return;
 
@@ -370,15 +386,17 @@ export class SupabaseGameEngine implements GameService {
       activity_date: activity.activityDate ?? null,
       imported_at: activity.importedAt,
       available: activity.available,
+      import_source: providerMode === "fake" ? "fixture" : "provider",
       metadata: {
         title: activity.title ?? null,
         creator: activity.creator ?? null,
         thumbnailUrl: activity.thumbnailUrl ?? null,
-        fixture: true,
+        fixture: providerMode === "fake",
       },
     }));
+    if (rows.length === 0) return;
     const { error } = await db.from("social_activity").upsert(rows, { onConflict: "user_id,provider,activity_type,video_id" });
-    if (error) throw this.databaseError(error, "Could not seed fake TikTok activity.");
+    if (error) throw this.databaseError(error, "Could not load social activity.");
   }
 
   private async requireRoomByCode(code: string): Promise<Room> {
@@ -413,11 +431,15 @@ export class SupabaseGameEngine implements GameService {
 
   private async activityByPlayer(playerIds: string[], activityTypes: ActivityType[]) {
     if (playerIds.length === 0) return new Map<string, SocialActivity[]>();
-    const { data, error } = await this.db()
+    let query = this.db()
       .from("social_activity")
       .select("*")
       .in("user_id", playerIds)
       .in("activity_type", activityTypes);
+    if ((process.env.SOCIAL_ACTIVITY_PROVIDER ?? "fake").toLowerCase() === "tiktok") {
+      query = query.neq("import_source", "fixture");
+    }
+    const { data, error } = await query;
     if (error) throw this.databaseError(error, "Could not load social activity.");
     const grouped = new Map(playerIds.map((id) => [id, [] as SocialActivity[]]));
     for (const row of (data ?? []) as unknown[]) {

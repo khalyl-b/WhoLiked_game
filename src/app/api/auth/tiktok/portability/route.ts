@@ -10,11 +10,11 @@ export async function GET(request: Request) {
   if (!clientKey || !redirectUri) return NextResponse.redirect(new URL("/account?error=tiktok_not_configured", request.url));
   const state = crypto.randomBytes(30).toString("base64url");
   const jar = await cookies();
-  jar.set("tiktok_oauth_state", `${userId}:login:${state}`, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600 });
+  jar.set("tiktok_oauth_state", `${userId}:portability:${state}`, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600 });
   const url = new URL("https://www.tiktok.com/v2/auth/authorize/");
   url.searchParams.set("client_key", clientKey);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "user.info.basic");
+  url.searchParams.set("scope", "user.info.basic,portability.all.single");
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
   return NextResponse.redirect(url);
