@@ -79,3 +79,12 @@ This execution container cannot currently complete `npm install` from the public
 - live webhook delivery from TikTok
 
 The handoff docs contain the exact migration, environment-variable and portal steps required for those external checks.
+
+
+## 2026-08-15 hotfix
+
+- Fixed white text on white link-buttons by moving the global anchor colour rule into Tailwind's base layer so explicit utility colours such as `text-black` take precedence.
+- Added `TIKTOK_PORTABILITY_ENABLED` (off by default) as a server-side feature flag.
+- Official Data Portability controls now show `Awaiting TikTok approval` until the flag is enabled.
+- Direct requests to `/api/auth/tiktok/portability` are guarded while approval is pending.
+- `/tiktok-import` also disables its Proceed action while approval is pending.

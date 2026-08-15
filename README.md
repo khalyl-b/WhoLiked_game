@@ -323,3 +323,8 @@ Coverage includes:
 - multi-context Playwright multiplayer flow
 
 See [BUILD_STATUS.md](./BUILD_STATUS.md) for what was actually executable in the current build environment and what still requires Vercel/a normal networked machine.
+
+
+### Data Portability feature flag
+
+Keep `TIKTOK_PORTABILITY_ENABLED=false` (or leave it unset) until TikTok approves the app for the required Data Portability scope. After approval, set it to `true` in Vercel and redeploy. This prevents users from being sent to a TikTok OAuth request for a scope the app cannot yet request.

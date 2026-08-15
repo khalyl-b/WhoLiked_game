@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ensureBrowserIdentity } from "@/lib/supabase/identity-browser";
 import { parseTikTokArchiveFile } from "@/features/social/tiktok-archive";
 
-type ConnectionStatus = { connected: boolean; displayName?: string; avatarUrl?: string; scopes?: string[]; connectedAt?: string };
+type ConnectionStatus = { connected: boolean; displayName?: string; avatarUrl?: string; scopes?: string[]; connectedAt?: string; portabilityAvailable?: boolean };
 type PortabilityRequest = { status: string; requestId: string; errorMessage?: string; createdAt: string; readyAt?: string; importedAt?: string };
 type ActivityStatus = { likes: number; request: PortabilityRequest | null; error?: string };
 
@@ -37,7 +37,8 @@ export default function AccountPage() {
     const connected = params.get("connected");
     const portability = params.get("portability");
     if (error === "tiktok_not_configured") setMessage("TikTok credentials are not configured for this environment.");
-    else if (error === "portability_scope_not_granted") setMessage("TikTok did not grant the Data Portability permission. This feature may still be awaiting TikTok approval.");
+    else if (error === "portability_scope_not_granted") setMessage("TikTok did not grant the Data Portability permission. This feature is still awaiting TikTok approval.");
+    else if (error === "portability_not_enabled") setMessage("Official TikTok likes import is disabled until TikTok approves the Data Portability scope for this app.");
     else if (error) setMessage("TikTok connection could not be completed.");
     else if (portability === "requested") setMessage("TikTok accepted your data request. It may take seconds, minutes or longer to prepare.");
     else if (connected) setMessage("TikTok connected successfully.");
@@ -122,6 +123,7 @@ export default function AccountPage() {
   const likes = activity?.likes ?? 0;
   const ready = likes >= 10;
   const portabilityApproved = status?.scopes?.some((scope: string) => scope === "portability.all.single" || scope === "portability.all.ongoing") ?? false;
+  const portabilityAvailable = status?.portabilityAvailable ?? false;
   const requestStatus = activity?.request?.status;
 
   return <main className="shell py-8 sm:py-12"><div className="mx-auto max-w-2xl">
@@ -148,7 +150,7 @@ export default function AccountPage() {
       <div className="mt-5 rounded-2xl border border-white/8 bg-white/4 p-4">
         <h3 className="font-black">Official Data Portability import</h3>
         <p className="mt-2 text-sm leading-6 text-zinc-400">This requests a one-time TikTok data export and extracts the Like List. It only works after TikTok approves the Data Portability scope for this app.</p>
-        {!status?.connected ? <p className="mt-3 text-sm text-amber-200">Connect TikTok first.</p> : requestStatus === "pending" ? <p className="mt-3 text-sm text-cyan-200">TikTok is preparing your data. This page checks periodically.</p> : requestStatus === "downloading" ? <div><Button className="mt-4" disabled={busy !== null} onClick={() => void downloadReadyData()}>{busy === "download" ? "Importing…" : "Import ready TikTok data"}</Button>{activity?.request?.errorMessage && <p className="mt-3 text-sm text-rose-300">Last attempt: {activity.request.errorMessage}</p>}</div> : requestStatus === "importing" ? <p className="mt-3 text-sm text-cyan-200">Import is in progress…</p> : requestStatus === "failed" ? <div className="mt-3"><p className="text-sm text-rose-300">Last import failed: {activity?.request?.errorMessage || "Unknown error"}</p><Link href="/tiktok-import" className="focus-ring mt-3 inline-block rounded-xl bg-white px-4 py-2 font-black text-black">Authorise a new import</Link></div> : <Link href="/tiktok-import" className="focus-ring mt-4 inline-block rounded-xl bg-white px-4 py-3 font-black text-black">{portabilityApproved ? "Request TikTok data" : "Authorise TikTok likes import"}</Link>}
+        {!status?.connected ? <p className="mt-3 text-sm text-amber-200">Connect TikTok first.</p> : requestStatus === "pending" ? <p className="mt-3 text-sm text-cyan-200">TikTok is preparing your data. This page checks periodically.</p> : requestStatus === "downloading" ? <div><Button className="mt-4" disabled={busy !== null} onClick={() => void downloadReadyData()}>{busy === "download" ? "Importing…" : "Import ready TikTok data"}</Button>{activity?.request?.errorMessage && <p className="mt-3 text-sm text-rose-300">Last attempt: {activity.request.errorMessage}</p>}</div> : requestStatus === "importing" ? <p className="mt-3 text-sm text-cyan-200">Import is in progress…</p> : requestStatus === "failed" && portabilityAvailable ? <div className="mt-3"><p className="text-sm text-rose-300">Last import failed: {activity?.request?.errorMessage || "Unknown error"}</p><Link href="/tiktok-import" className="focus-ring mt-3 inline-block rounded-xl bg-white px-4 py-2 font-black text-black">Authorise a new import</Link></div> : portabilityAvailable ? <Link href="/tiktok-import" className="focus-ring mt-4 inline-block rounded-xl bg-white px-4 py-3 font-black text-black">{portabilityApproved ? "Request TikTok data" : "Authorise TikTok likes import"}</Link> : <div className="mt-4"><Button disabled>Awaiting TikTok approval</Button><p className="mt-2 text-xs leading-5 text-zinc-500">Official import will unlock after TikTok approves the Data Portability scope. You can use the manual archive importer below in the meantime.</p></div>}
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/8 bg-white/4 p-4">

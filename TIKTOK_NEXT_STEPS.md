@@ -270,3 +270,8 @@ SOCIAL_ACTIVITY_PROVIDER=tiktok
 ## 16. Do not implement reposts yet
 
 The database/domain still understands `REPOST`, but the production UI should continue to show reposts as unavailable until a legitimate supported data source for the exact use case is approved and implemented.
+
+
+### Data Portability feature flag
+
+Keep `TIKTOK_PORTABILITY_ENABLED=false` (or leave it unset) until TikTok approves the app for the required Data Portability scope. After approval, set it to `true` in Vercel and redeploy. This prevents users from being sent to a TikTok OAuth request for a scope the app cannot yet request.

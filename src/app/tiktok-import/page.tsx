@@ -1,10 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ensureBrowserIdentity } from "@/lib/supabase/identity-browser";
 
 export default function TikTokImportConsentPage() {
+  const [portabilityAvailable, setPortabilityAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void fetch("/api/auth/tiktok/status", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: { portabilityAvailable?: boolean }) => setPortabilityAvailable(payload.portabilityAvailable === true))
+      .catch(() => setPortabilityAvailable(false));
+  }, []);
+
   async function proceed() {
     await ensureBrowserIdentity();
     window.location.assign("/api/auth/tiktok/portability");
@@ -24,8 +34,9 @@ export default function TikTokImportConsentPage() {
       </div>
 
       <p className="mt-6 text-sm leading-6 text-zinc-400">You can delete imported TikTok data at any time from <Link href="/account" className="underline text-zinc-200">Account</Link>. See the <Link href="/privacy" className="underline text-zinc-200">Privacy Policy</Link> for details.</p>
+      {portabilityAvailable === false && <p className="mt-6 rounded-xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-sm leading-6 text-amber-100">Official Data Portability import is waiting for TikTok approval. Use the manual archive importer on the Account page for now.</p>}
       <div className="mt-7 grid gap-3 sm:grid-cols-2">
-        <Button onClick={() => void proceed()}>Proceed to TikTok</Button>
+        <Button disabled={portabilityAvailable !== true} onClick={() => void proceed()}>{portabilityAvailable === null ? "Checking availability…" : portabilityAvailable ? "Proceed to TikTok" : "Awaiting TikTok approval"}</Button>
         <Link href="/account" className="focus-ring rounded-2xl border border-white/10 bg-white/7 px-5 py-3 text-center font-black hover:bg-white/12">Go back</Link>
       </div>
     </div>

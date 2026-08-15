@@ -4,6 +4,9 @@ import { cookies } from "next/headers";
 import { ensureSessionUserId } from "@/server/session/session";
 
 export async function GET(request: Request) {
+  if (process.env.TIKTOK_PORTABILITY_ENABLED !== "true") {
+    return NextResponse.redirect(new URL("/account?error=portability_not_enabled", request.url));
+  }
   const userId = await ensureSessionUserId();
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const redirectUri = process.env.TIKTOK_REDIRECT_URI;
