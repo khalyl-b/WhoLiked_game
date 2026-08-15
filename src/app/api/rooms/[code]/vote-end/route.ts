@@ -1,5 +1,3 @@
-export const maxDuration = 60;
-
 import { NextResponse } from "next/server";
 import { getGameEngine } from "@/server/game/game-runtime";
 import { jsonError } from "@/server/game/http";
@@ -11,7 +9,9 @@ export async function POST(_request: Request, context: { params: Promise<{ code:
     const userId = await getSessionUserId();
     if (!userId) throw new GameError("NO_SESSION", "Join this room first.", 401);
     const { code } = await context.params;
-    await getGameEngine().startGame(code, userId);
-    return NextResponse.json({ ok: true });
-  } catch (error) { return jsonError(error); }
+    const result = await getGameEngine().voteToEndRound(code, userId);
+    return NextResponse.json({ ok: true, result });
+  } catch (error) {
+    return jsonError(error);
+  }
 }

@@ -83,6 +83,18 @@ export function RoomClient({ code }: { code: string }) {
             return <motion.button whileTap={{ scale: .98 }} key={player.userId} disabled={locked || !!busyAction} onClick={() => void run("guess", { guessedUserId: player.userId })} aria-pressed={selected} className={`focus-ring min-h-16 rounded-2xl border px-5 text-lg font-black transition ${selected ? "border-cyan-300 bg-cyan-300 text-black" : "border-white/10 bg-white/6 hover:bg-white/10"} disabled:cursor-not-allowed`}>{player.displayName}</motion.button>;
           })}</div>
           {state.viewerGuess && <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-4 text-center font-black text-cyan-300">Guess locked</motion.p>}
+          <div className="mt-5 flex flex-col items-center gap-2">
+            <Button
+              variant="secondary"
+              disabled={state.viewerVotedToEnd || !!busyAction}
+              onClick={() => void run("vote-end")}
+            >
+              {state.viewerVotedToEnd ? "Voted to end round" : "Vote to end round early"}
+            </Button>
+            <p className="text-xs text-zinc-500">
+              {state.endRoundVoteCount ?? 0}/{state.endRoundVotesRequired ?? (Math.floor(state.players.length / 2) + 1)} votes · more than 50% ends the round
+            </p>
+          </div>
         </motion.section>}
       </AnimatePresence>
       {host && state.room.status === "ACTIVE" && <div className="mt-6 flex justify-center gap-3"><Button variant="secondary" disabled={!!busyAction} onClick={() => void run("skip")}>Skip round</Button><Button variant="danger" disabled={!!busyAction} onClick={() => void run("end")}>End game</Button></div>}

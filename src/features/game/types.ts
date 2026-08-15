@@ -25,9 +25,12 @@ export interface SocialActivity {
   available: boolean;
 }
 
+export type GuessDurationSeconds = 0 | 10 | 15 | 20 | 30 | 45 | 60 | 90 | 120;
+
 export interface RoomSettings {
   roundCount: 5 | 10 | 15 | 20;
-  guessDurationSeconds: 10 | 15 | 20 | 30;
+  /** 0 means there is no automatic guess deadline. */
+  guessDurationSeconds: GuessDurationSeconds;
   activityTypes: ActivityType[];
 }
 
@@ -114,4 +117,7 @@ export interface PublicRoomState {
   viewerGuess?: string;
   canStart: boolean;
   startBlockReason?: string;
+  endRoundVoteCount?: number;
+  endRoundVotesRequired?: number;
+  viewerVotedToEnd?: boolean;
 }

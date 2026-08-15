@@ -11,7 +11,7 @@ export default function CreatePage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [roundCount, setRoundCount] = useState<5 | 10 | 15 | 20>(10);
-  const [timer, setTimer] = useState<10 | 15 | 20 | 30>(15);
+  const [timer, setTimer] = useState<0 | 30 | 45 | 60 | 90>(60);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -39,7 +39,10 @@ export default function CreatePage() {
     <form onSubmit={submit} className="panel mt-6 space-y-6 p-5 sm:p-7">
       <label className="block space-y-2"><span className="text-sm font-bold text-zinc-300">Your name</span><Input required maxLength={30} placeholder="James" value={name} onChange={(e) => setName(e.target.value)} autoComplete="nickname" /></label>
       <ChoiceGrid label="Rounds" values={[5,10,15,20] as const} value={roundCount} onChange={setRoundCount} />
-      <ChoiceGrid label="Guess timer" values={[10,15,20,30] as const} value={timer} onChange={setTimer} suffix="s" />
+      <fieldset className="space-y-2"><legend className="text-sm font-bold text-zinc-300">Guess timer</legend>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{([30,45,60,90,0] as const).map((seconds) => <button key={seconds} type="button" onClick={() => setTimer(seconds)} aria-pressed={timer === seconds} className={`focus-ring min-h-12 rounded-xl border px-2 font-bold ${timer === seconds ? "border-cyan-300 bg-cyan-300 text-black" : "border-white/10 bg-white/5 text-white"}`}>{seconds === 0 ? "Unlimited" : `${seconds}s`}</button>)}</div>
+        <p className="text-xs text-zinc-500">30 seconds minimum. Unlimited rounds end when everyone guesses or a majority votes to end early.</p>
+      </fieldset>
       <fieldset className="space-y-2"><legend className="text-sm font-bold text-zinc-300">Sources</legend>
         <label className="flex min-h-14 items-center gap-3 rounded-2xl border border-cyan-300/50 bg-cyan-300/10 px-4"><input type="checkbox" checked readOnly /> <span className="font-bold">Likes</span></label>
         <label className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/8 bg-white/3 px-4 text-zinc-500"><input type="checkbox" disabled /> <span><strong>Reposts</strong> <span className="text-xs">Coming soon</span></span></label>

@@ -6,6 +6,7 @@ export interface GameService {
   getPublicState(code: string, viewerUserId: string): Promise<PublicRoomState>;
   startGame(code: string, actorUserId: string): Promise<void>;
   submitGuess(code: string, actorUserId: string, guessedUserId: string): Promise<unknown>;
+  voteToEndRound(code: string, actorUserId: string): Promise<unknown>;
   skipRound(code: string, actorUserId: string): Promise<void>;
   endGame(code: string, actorUserId: string): Promise<void>;
   createRematch(code: string, actorUserId: string): Promise<Room | void>;

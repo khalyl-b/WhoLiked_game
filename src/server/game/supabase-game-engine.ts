@@ -16,6 +16,7 @@ import { FakeTikTokProvider } from "@/providers/social/fake-tiktok-provider";
 import type { SocialActivityProvider } from "@/providers/social/social-activity-provider";
 import { GameError } from "./errors";
 import type { GameService } from "./game-service";
+import { checkTikTokVideosWithConcurrency } from "@/server/social/tiktok-video-availability";
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const MAX_PLAYERS = 10;
@@ -253,6 +254,23 @@ export class SupabaseGameEngine implements GameService {
       }
     }
 
+    let endRoundVoteCount: number | undefined;
+    let endRoundVotesRequired: number | undefined;
+    let viewerVotedToEnd: boolean | undefined;
+    if (round?.status === "ACTIVE") {
+      const activeIds = players.map((player) => player.userId);
+      const { data: voteRows, error: voteError } = await db
+        .from("round_end_votes")
+        .select("user_id")
+        .eq("round_id", round.id)
+        .in("user_id", activeIds);
+      if (voteError) throw this.databaseError(voteError, "Could not load end-round votes.");
+      const voteIds = new Set(((voteRows ?? []) as Array<{ user_id: string }>).map((row) => row.user_id));
+      endRoundVoteCount = voteIds.size;
+      endRoundVotesRequired = Math.floor(players.length / 2) + 1;
+      viewerVotedToEnd = voteIds.has(viewerUserId);
+    }
+
     return {
       serverTime: new Date().toISOString(),
       room,
@@ -262,6 +280,9 @@ export class SupabaseGameEngine implements GameService {
       viewerGuess,
       canStart: room.status === "LOBBY" && !startBlockReason,
       startBlockReason,
+      endRoundVoteCount,
+      endRoundVotesRequired,
+      viewerVotedToEnd,
     };
   }
 
@@ -295,7 +316,39 @@ export class SupabaseGameEngine implements GameService {
       );
     }
 
-    const candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, validation.distribution);
+    let candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, validation.distribution);
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      let availability: Map<string, "available" | "unavailable">;
+      try {
+        availability = await checkTikTokVideosWithConcurrency(candidates.map((candidate) => candidate.activity));
+      } catch (error) {
+        console.error("TikTok availability preflight failed", error);
+        throw new GameError("AVAILABILITY_CHECK_FAILED", "TikTok could not verify the selected videos right now. Try starting the game again in a moment.", 503);
+      }
+
+      const unavailableVideoIds = [...availability.entries()]
+        .filter(([, status]) => status === "unavailable")
+        .map(([videoId]) => videoId);
+      if (unavailableVideoIds.length === 0) break;
+
+      const { error: unavailableError } = await this.db()
+        .from("social_activity")
+        .update({ available: false })
+        .in("video_id", unavailableVideoIds);
+      if (unavailableError) throw this.databaseError(unavailableError, "Could not mark unavailable TikToks.");
+
+      const rejected = new Set(unavailableVideoIds);
+      for (const [userId, activities] of activityByUser) {
+        activityByUser.set(userId, activities.filter((activity) => !rejected.has(activity.videoId)));
+      }
+      const retryValidation = validateActivityCapacity(playerIds, room.settings.roundCount, activityByUser, this.random);
+      if (!retryValidation.ok) {
+        throw new GameError("INSUFFICIENT_ACTIVITY", "There are not enough currently available TikTok videos to start this game.", 409);
+      }
+      candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, retryValidation.distribution);
+      if (attempt === 7) throw new GameError("AVAILABILITY_CHECK_FAILED", "Too many selected TikTok videos are unavailable. Try again.", 409);
+    }
+
     const payload = candidates.map((candidate) => ({
       sourceUserId: candidate.ownerUserId,
       activityId: candidate.activity.id,
@@ -316,6 +369,16 @@ export class SupabaseGameEngine implements GameService {
       p_room_id: room.id,
       p_guessing_user_id: actorUserId,
       p_guessed_user_id: guessedUserId,
+    });
+    if (error) throw this.rpcError(error);
+    return data;
+  }
+
+  async voteToEndRound(code: string, actorUserId: string) {
+    const room = await this.requireRoomByCode(code);
+    const { data, error } = await this.db().rpc("vote_to_end_current_round", {
+      p_room_id: room.id,
+      p_actor_user_id: actorUserId,
     });
     if (error) throw this.rpcError(error);
     return data;
@@ -575,7 +638,7 @@ export class SupabaseGameEngine implements GameService {
 
   private validateSettings(settings: RoomSettings) {
     if (![5, 10, 15, 20].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Invalid round count.");
-    if (![10, 15, 20, 30].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Invalid guess timer.");
+    if (![0, 30, 45, 60, 90].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Guess timer must be 30, 45, 60, 90 seconds or Unlimited.");
     if (!settings.activityTypes.length) throw new GameError("INVALID_SETTINGS", "Select at least one activity source.");
     if (settings.activityTypes.some((type) => !("LIKE" === type || "REPOST" === type))) throw new GameError("INVALID_SETTINGS", "Invalid activity source.");
   }
@@ -675,7 +738,7 @@ export class SupabaseGameEngine implements GameService {
 
   private rpcError(error: { message?: string; code?: string }) {
     const message = error.message ?? "Game operation failed.";
-    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET)/)?.[1];
+    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET|ALREADY_VOTED)/)?.[1];
     const status = code === "ROOM_NOT_FOUND" || code === "ROUND_NOT_FOUND" ? 404
       : code === "NOT_IN_ROOM" || code === "HOST_ONLY" ? 403
       : 409;
@@ -694,6 +757,7 @@ export class SupabaseGameEngine implements GameService {
       PLAYER_SET_CHANGED: "The player list changed while the game was starting. Press Start again.",
       INSUFFICIENT_ACTIVITY: "There is not enough eligible activity to start this game.",
       INVALID_TARGET: "That player cannot be removed.",
+      ALREADY_VOTED: "You already voted to end this round.",
     };
     return new GameError(code ?? "DATABASE_OPERATION_FAILED", code ? friendly[code] : message, status);
   }

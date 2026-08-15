@@ -139,6 +139,10 @@ export class GameEngine implements GameService {
       }
     }
 
+    const votes = round ? this.db.roundEndVotes.get(round.id) ?? new Set<string>() : new Set<string>();
+    const activeVoters = new Set(players.map((player) => player.userId));
+    const endRoundVoteCount = [...votes].filter((userId) => activeVoters.has(userId)).length;
+
     return {
       serverTime: this.now().toISOString(),
       room: structuredClone(room),
@@ -148,6 +152,11 @@ export class GameEngine implements GameService {
       viewerGuess,
       canStart: room.status === "LOBBY" && !startBlockReason,
       startBlockReason,
+      ...(round?.status === "ACTIVE" ? {
+        endRoundVoteCount,
+        endRoundVotesRequired: Math.floor(players.length / 2) + 1,
+        viewerVotedToEnd: votes.has(viewerUserId),
+      } : {}),
     };
   }
 
@@ -191,7 +200,7 @@ export class GameEngine implements GameService {
     this.requireActivePlayer(room.id, guessedUserId);
     const round = this.currentRound(room);
     if (!round || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is not accepting guesses.", 409);
-    if (!round.answerDeadline || this.now().getTime() > new Date(round.answerDeadline).getTime()) {
+    if (round.answerDeadline && this.now().getTime() > new Date(round.answerDeadline).getTime()) {
       await this.tickRoom(room);
       throw new GameError("DEADLINE_PASSED", "The guess deadline has passed.", 409);
     }
@@ -214,6 +223,24 @@ export class GameEngine implements GameService {
     this.db.guesses.set(guess.id, guess);
     if (this.guessesForRound(round.id).length >= this.activeRoomPlayers(room.id).length) this.revealRound(room, round);
     return guess;
+  }
+
+  async voteToEndRound(code: string, actorUserId: string) {
+    const room = this.requireRoomByCode(code);
+    if (room.status !== "ACTIVE") throw new GameError("INVALID_STATE", "There is no active round to vote on.", 409);
+    this.requireActivePlayer(room.id, actorUserId);
+    const round = this.currentRound(room);
+    if (!round || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is no longer accepting votes.", 409);
+
+    const votes = this.db.roundEndVotes.get(round.id) ?? new Set<string>();
+    votes.add(actorUserId);
+    this.db.roundEndVotes.set(round.id, votes);
+    const players = this.activeRoomPlayers(room.id);
+    const activeIds = new Set(players.map((player) => player.userId));
+    const voteCount = [...votes].filter((userId) => activeIds.has(userId)).length;
+    const required = Math.floor(players.length / 2) + 1;
+    if (voteCount >= required) this.revealRound(room, round);
+    return { voteCount, required, revealed: voteCount >= required };
   }
 
   async skipRound(code: string, actorUserId: string) {
@@ -314,12 +341,14 @@ export class GameEngine implements GameService {
   private startRound(room: Room, round: Round) {
     round.status = "ACTIVE";
     round.startedAt = this.now().toISOString();
-    round.answerDeadline = new Date(this.now().getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
+    round.answerDeadline = room.settings.guessDurationSeconds === 0
+      ? undefined
+      : new Date(this.now().getTime() + room.settings.guessDurationSeconds * 1000).toISOString();
   }
 
   private validateSettings(settings: RoomSettings) {
     if (![5, 10, 15, 20].includes(settings.roundCount)) throw new GameError("INVALID_SETTINGS", "Invalid round count.");
-    if (![10, 15, 20, 30].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Invalid guess timer.");
+    if (![0, 30, 45, 60, 90].includes(settings.guessDurationSeconds)) throw new GameError("INVALID_SETTINGS", "Guess timer must be 30, 45, 60, 90 seconds or Unlimited.");
     if (!settings.activityTypes.length) throw new GameError("INVALID_SETTINGS", "Select at least one activity source.");
     if (settings.activityTypes.some((type) => !(["LIKE", "REPOST"] satisfies ActivityType[]).includes(type))) throw new GameError("INVALID_SETTINGS", "Invalid activity source.");
   }

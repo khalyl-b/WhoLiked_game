@@ -82,6 +82,11 @@ export function useRoomState(code: string) {
         { event: "*", schema: "public", table: "room_players", filter: `room_id=eq.${roomId}` },
         () => void refresh(),
       );
+      channel = channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "round_end_votes", filter: `room_id=eq.${roomId}` },
+        () => void refresh(),
+      );
     }
 
     channel = channel.subscribe((status) => {

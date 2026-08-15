@@ -14,6 +14,10 @@ export function Countdown({ deadline, serverTime }: { deadline?: string; serverT
     return () => window.clearInterval(timer);
   }, [deadline, offset]);
 
+  if (!deadline) {
+    return <div aria-live="polite" className="min-w-24 rounded-2xl bg-white/8 px-4 py-2 text-center text-lg font-black">Unlimited</div>;
+  }
+
   const seconds = Math.ceil(remaining / 1000);
   const urgent = seconds <= 5;
   return <motion.div aria-live="polite" animate={urgent ? { scale: [1, 1.08, 1] } : { scale: 1 }} transition={{ duration: 0.55, repeat: urgent ? Infinity : 0 }} className={`min-w-16 rounded-2xl px-4 py-2 text-center text-2xl font-black tabular-nums ${urgent ? "bg-red-500/20 text-red-200" : "bg-white/8"}`}>{seconds}s</motion.div>;
