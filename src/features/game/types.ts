@@ -93,10 +93,10 @@ export interface PublicRound {
   id: string;
   roundNumber: number;
   status: RoundStatus;
-  activity?: Pick<SocialActivity, "videoId" | "videoUrl" | "title" | "creator" | "thumbnailUrl">;
+  activity?: Pick<SocialActivity, "videoId" | "videoUrl" | "title" | "creator" | "thumbnailUrl" | "activityType">;
   answerDeadline?: string;
-  sourceUserId?: string;
-  sourceDisplayName?: string;
+  correctUserIds?: string[];
+  correctDisplayNames?: string[];
   guesses?: Array<{
     guessingUserId: string;
     guessedUserId: string;

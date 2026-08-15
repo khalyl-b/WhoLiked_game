@@ -12,7 +12,7 @@ import type {
 } from "@/features/game/types";
 import { FakeTikTokProvider } from "@/providers/social/fake-tiktok-provider";
 import type { SocialActivityProvider } from "@/providers/social/social-activity-provider";
-import { generateRoundCandidates, uniqueOwnerActivities, validateActivityCapacity } from "@/features/game/round-generation";
+import { correctOwnerIdsForActivity, eligibleActivitiesByUser, generateRoundCandidates, validateActivityCapacity } from "@/features/game/round-generation";
 import { GameError } from "./errors";
 import { getMemoryDatabase, type MemoryDatabase } from "./memory-store";
 import type { GameService } from "./game-service";
@@ -75,7 +75,7 @@ export class GameEngine implements GameService {
 
     const players = this.activeRoomPlayers(room.id);
     const activityByUser = this.activityByPlayer(players.map((player) => player.userId), room.settings.activityTypes);
-    const eligible = uniqueOwnerActivities(activityByUser);
+    const eligible = eligibleActivitiesByUser(activityByUser);
     const validation = validateActivityCapacity(players.map((player) => player.userId), room.settings.roundCount, activityByUser);
 
     const publicPlayers = players
@@ -108,18 +108,22 @@ export class GameEngine implements GameService {
           title: activity.title,
           creator: activity.creator,
           thumbnailUrl: activity.thumbnailUrl,
+          activityType: activity.activityType,
         } : undefined,
         answerDeadline: round.answerDeadline,
-        ...(reveal ? {
-          sourceUserId: round.sourceUserId,
-          sourceDisplayName: this.requireUser(round.sourceUserId).displayName,
+        ...(reveal && activity ? (() => {
+          const correctUserIds = correctOwnerIdsForActivity(activityByUser, activity);
+          return {
+          correctUserIds,
+          correctDisplayNames: correctUserIds.map((userId) => this.requireUser(userId).displayName),
           guesses: guesses.map((guess) => ({
             guessingUserId: guess.guessingUserId,
             guessedUserId: guess.guessedUserId,
             correct: guess.correct,
             points: guess.points,
           })),
-        } : {}),
+          };
+        })() : {}),
       };
     }
 
@@ -127,8 +131,12 @@ export class GameEngine implements GameService {
     if (players.length < MIN_PLAYERS) startBlockReason = "At least 2 players are required.";
     else if (!validation.ok) {
       const first = validation.shortages[0];
-      const name = this.requireUser(first.userId).displayName;
-      startBlockReason = `${name} has ${first.eligible}/${first.required} eligible videos.`;
+      if (first) {
+        const name = this.requireUser(first.userId).displayName;
+        startBlockReason = `${name} has ${first.eligible}/${first.required} eligible videos.`;
+      } else {
+        startBlockReason = `The room needs at least ${room.settings.roundCount} distinct videos across the selected activity pools.`;
+      }
     }
 
     return {
@@ -151,9 +159,9 @@ export class GameEngine implements GameService {
     if (players.length < MIN_PLAYERS) throw new GameError("NOT_ENOUGH_PLAYERS", "At least 2 players are required.", 409);
     const activityByUser = this.activityByPlayer(players.map((player) => player.userId), room.settings.activityTypes);
     const validation = validateActivityCapacity(players.map((player) => player.userId), room.settings.roundCount, activityByUser, this.random);
-    if (!validation.ok) throw new GameError("INSUFFICIENT_ACTIVITY", "One or more players do not have enough unique eligible activity.", 409);
+    if (!validation.ok) throw new GameError("INSUFFICIENT_ACTIVITY", "There is not enough eligible activity to create the configured number of distinct rounds.", 409);
 
-    const candidates = generateRoundCandidates(players.map((player) => player.userId), room.settings.roundCount, activityByUser, this.random);
+    const candidates = generateRoundCandidates(players.map((player) => player.userId), room.settings.roundCount, activityByUser, this.random, validation.distribution);
     for (const oldRound of this.roundsForGame(room.id, room.gameNumber)) this.db.rounds.delete(oldRound.id);
     for (const candidate of candidates.entries()) {
       const [index, value] = candidate;
@@ -190,7 +198,10 @@ export class GameEngine implements GameService {
     if (this.guessesForRound(round.id).some((guess) => guess.guessingUserId === actorUserId)) {
       throw new GameError("DUPLICATE_GUESS", "Your guess is already locked in.", 409);
     }
-    const correct = guessedUserId === round.sourceUserId;
+    const activity = this.db.activities.get(round.activityId);
+    if (!activity) throw new GameError("ROUND_ACTIVITY_MISSING", "The round activity is unavailable.", 409);
+    const activityByUser = this.activityByPlayer(this.activeRoomPlayers(room.id).map((player) => player.userId), room.settings.activityTypes);
+    const correct = correctOwnerIdsForActivity(activityByUser, activity).includes(guessedUserId);
     const guess: Guess = {
       id: crypto.randomUUID(),
       roundId: round.id,

@@ -10,7 +10,7 @@ import type {
   Round,
   SocialActivity,
 } from "@/features/game/types";
-import { generateRoundCandidates, uniqueOwnerActivities, validateActivityCapacity } from "@/features/game/round-generation";
+import { generateRoundCandidates, validateActivityCapacity } from "@/features/game/round-generation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { FakeTikTokProvider } from "@/providers/social/fake-tiktok-provider";
 import type { SocialActivityProvider } from "@/providers/social/social-activity-provider";
@@ -224,18 +224,22 @@ export class SupabaseGameEngine implements GameService {
           title: activity.title,
           creator: activity.creator,
           thumbnailUrl: activity.thumbnailUrl,
+          activityType: activity.activityType,
         } : undefined,
         answerDeadline: round.answerDeadline,
-        ...(reveal ? {
-          sourceUserId: round.sourceUserId,
-          sourceDisplayName: users.get(round.sourceUserId)?.displayName ?? (await this.requireUser(round.sourceUserId)).displayName,
-          guesses: guesses.map((guess) => ({
-            guessingUserId: guess.guessingUserId,
-            guessedUserId: guess.guessedUserId,
-            correct: guess.correct,
-            points: guess.points,
-          })),
-        } : {}),
+        ...(reveal && activity ? await (async () => {
+          const correctUserIds = await this.correctOwnerIdsForActivity(room.id, round.activityId);
+          return {
+            correctUserIds,
+            correctDisplayNames: correctUserIds.map((userId) => users.get(userId)?.displayName ?? "Player"),
+            guesses: guesses.map((guess) => ({
+              guessingUserId: guess.guessingUserId,
+              guessedUserId: guess.guessedUserId,
+              correct: guess.correct,
+              points: guess.points,
+            })),
+          };
+        })() : {}),
       };
     }
 
@@ -271,9 +275,27 @@ export class SupabaseGameEngine implements GameService {
     const playerIds = players.map((player) => player.userId);
     const activityByUser = await this.activityByPlayer(playerIds, room.settings.activityTypes);
     const validation = validateActivityCapacity(playerIds, room.settings.roundCount, activityByUser, this.random);
-    if (!validation.ok) throw new GameError("INSUFFICIENT_ACTIVITY", "One or more players do not have enough unique eligible activity.", 409);
+    if (!validation.ok) {
+      const users = await this.usersByIds(playerIds);
+      if (validation.shortages.length > 0) {
+        const details = validation.shortages.map(({ userId, eligible, required }) => {
+          const name = users.get(userId)?.displayName ?? "Player";
+          return `${name}: ${eligible}/${required} eligible`;
+        });
+        throw new GameError(
+          "INSUFFICIENT_ACTIVITY",
+          `One or more players do not have enough eligible videos. ${details.join("; ")}. Shared likes are allowed.`,
+          409,
+        );
+      }
+      throw new GameError(
+        "INSUFFICIENT_ACTIVITY",
+        `The room does not have enough distinct videos to create ${room.settings.roundCount} non-repeating rounds. Shared likes are allowed and count for every player who liked them.`,
+        409,
+      );
+    }
 
-    const candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random);
+    const candidates = generateRoundCandidates(playerIds, room.settings.roundCount, activityByUser, this.random, validation.distribution);
     const payload = candidates.map((candidate) => ({
       sourceUserId: candidate.ownerUserId,
       activityId: candidate.activity.id,
@@ -465,7 +487,7 @@ export class SupabaseGameEngine implements GameService {
 
     // Fetch each player's activity independently and page through the complete
     // result set. This is used when starting a game, where we need the full pool
-    // to correctly exclude videos liked by more than one room member.
+    // to generate fair non-repeating rounds even when room members share liked videos.
     await Promise.all(playerIds.map(async (userId) => {
       let from = 0;
       while (true) {
@@ -489,6 +511,41 @@ export class SupabaseGameEngine implements GameService {
     }));
 
     return grouped;
+  }
+
+  private async correctOwnerIdsForActivity(roomId: string, activityId: string): Promise<string[]> {
+    const db = this.db();
+    const { data: selectedData, error: selectedError } = await db
+      .from("social_activity")
+      .select("video_id,activity_type,import_source")
+      .eq("id", activityId)
+      .maybeSingle();
+    if (selectedError) throw this.databaseError(selectedError, "Could not load round ownership.");
+    if (!selectedData) return [];
+
+    const players = await this.activeRoomPlayers(roomId);
+    const playerIds = players.map((player) => player.userId);
+    if (playerIds.length === 0) return [];
+
+    const selected = selectedData as { video_id: string; activity_type: ActivityType; import_source?: string };
+    let query = db
+      .from("social_activity")
+      .select("user_id")
+      .in("user_id", playerIds)
+      .eq("video_id", selected.video_id)
+      .eq("activity_type", selected.activity_type)
+      .eq("available", true);
+
+    if (selected.import_source === "fixture") query = query.eq("import_source", "fixture");
+    else query = query.neq("import_source", "fixture");
+
+    const { data, error } = await query;
+    if (error) throw this.databaseError(error, "Could not load round ownership.");
+    const correctIds = new Set(((data ?? []) as Array<{ user_id: string }>).map((row) => row.user_id));
+    return players
+      .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))
+      .map((player) => player.userId)
+      .filter((userId) => correctIds.has(userId));
   }
 
   private async activityById(activityId: string): Promise<SocialActivity | null> {
