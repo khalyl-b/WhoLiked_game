@@ -14,6 +14,7 @@ import { FakeTikTokProvider } from "@/providers/social/fake-tiktok-provider";
 import type { SocialActivityProvider } from "@/providers/social/social-activity-provider";
 import { correctOwnerIdsForActivity, eligibleActivitiesByUser, generateRoundCandidates, validateActivityCapacity } from "@/features/game/round-generation";
 import { GameError } from "./errors";
+import { calculateCorrectGuessPoints } from "@/features/game/scoring";
 import { getMemoryDatabase, type MemoryDatabase } from "./memory-store";
 import type { GameService } from "./game-service";
 
@@ -200,7 +201,7 @@ export class GameEngine implements GameService {
     this.requireActivePlayer(room.id, guessedUserId);
     const round = this.currentRound(room);
     if (!round || round.status !== "ACTIVE") throw new GameError("ROUND_CLOSED", "This round is not accepting guesses.", 409);
-    if (round.answerDeadline && this.now().getTime() > new Date(round.answerDeadline).getTime()) {
+    if (round.answerDeadline && this.now().getTime() >= new Date(round.answerDeadline).getTime()) {
       await this.tickRoom(room);
       throw new GameError("DEADLINE_PASSED", "The guess deadline has passed.", 409);
     }
@@ -211,14 +212,19 @@ export class GameEngine implements GameService {
     if (!activity) throw new GameError("ROUND_ACTIVITY_MISSING", "The round activity is unavailable.", 409);
     const activityByUser = this.activityByPlayer(this.activeRoomPlayers(room.id).map((player) => player.userId), room.settings.activityTypes);
     const correct = correctOwnerIdsForActivity(activityByUser, activity).includes(guessedUserId);
+    const submittedAt = this.now().toISOString();
     const guess: Guess = {
       id: crypto.randomUUID(),
       roundId: round.id,
       guessingUserId: actorUserId,
       guessedUserId,
-      submittedAt: this.now().toISOString(),
+      submittedAt,
       correct,
-      points: correct ? 1 : 0,
+      points: correct ? calculateCorrectGuessPoints({
+        startedAt: round.startedAt,
+        answerDeadline: round.answerDeadline,
+        submittedAt,
+      }) : 0,
     };
     this.db.guesses.set(guess.id, guess);
     if (this.guessesForRound(round.id).length >= this.activeRoomPlayers(room.id).length) this.revealRound(room, round);

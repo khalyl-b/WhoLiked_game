@@ -65,13 +65,13 @@ export function RoomClient({ code }: { code: string }) {
   return <main className="shell py-5 sm:py-8">
     <ConnectionBanner show={reconnecting} />
     <div className="mx-auto max-w-3xl">
-      <header className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-zinc-500">Round</p><p className="text-xl font-black">{round.roundNumber} / {state.room.settings.roundCount}</p></div>{!revealing && <Countdown deadline={round.answerDeadline} serverTime={state.serverTime} />}</header>
+      <header className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-zinc-500">Round</p><p className="text-xl font-black">{round.roundNumber} / {state.room.settings.roundCount}</p></div>{!revealing && <Countdown deadline={round.answerDeadline} serverTime={state.serverTime} durationSeconds={state.room.settings.guessDurationSeconds} />}</header>
       <AnimatePresence mode="wait">
         {revealing ? <motion.section key={`reveal-${round.id}`} initial={{ opacity: 0, scale: .96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
           <div className="panel p-6 text-center sm:p-8"><p className="text-sm font-bold uppercase tracking-[.18em] text-zinc-500">{round.activity?.activityType === "REPOST" ? "Reposted by…" : "Liked by…"}</p><h1 className="mt-2 text-4xl font-black text-cyan-300 sm:text-6xl">{formatAnswerNames(round.correctDisplayNames ?? [])}</h1>
             <div className="mt-6 space-y-2 text-left">{state.players.map((player) => {
               const guess = round.guesses?.find((item) => item.guessingUserId === player.userId);
-              return <div key={player.userId} className="flex items-center gap-3 rounded-2xl bg-white/5 px-4 py-3"><span className="min-w-0 flex-1 truncate font-bold">{player.displayName}</span><span className={`text-sm font-black ${guess?.correct ? "text-emerald-300" : "text-zinc-400"}`}>{guess ? (guess.correct ? "Correct +1" : "Wrong") : "No guess"}</span></div>;
+              return <div key={player.userId} className="flex items-center gap-3 rounded-2xl bg-white/5 px-4 py-3"><span className="min-w-0 flex-1 truncate font-bold">{player.displayName}</span><span className={`text-sm font-black ${guess?.correct ? "text-emerald-300" : "text-zinc-400"}`}>{guess ? (guess.correct ? `Correct +${guess.points}` : "Wrong") : "No guess"}</span></div>;
             })}</div>
           </div>
           <div className="mt-4"><Leaderboard players={state.players} compact /></div>

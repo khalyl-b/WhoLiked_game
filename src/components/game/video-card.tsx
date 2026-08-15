@@ -9,7 +9,7 @@ function isFixtureVideo(videoId: string | undefined) {
 
 function embedUrl(videoId: string | undefined) {
   if (!videoId || !/^\d{6,19}$/.test(videoId)) return null;
-  return `https://www.tiktok.com/player/v1/${videoId}?autoplay=1&loop=1&controls=1&progress_bar=1&play_button=1&volume_control=1&fullscreen_button=1&timestamp=1&music_info=1&description=1&rel=0`;
+  return `https://www.tiktok.com/player/v1/${videoId}?autoplay=1&muted=0&loop=1&controls=1&progress_bar=1&play_button=1&volume_control=1&fullscreen_button=1&timestamp=1&music_info=1&description=1&rel=0`;
 }
 
 export function VideoCard({
@@ -25,7 +25,8 @@ export function VideoCard({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const reportedUnavailable = useRef(false);
-  const [autoplayMuted, setAutoplayMuted] = useState(false);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  const unmuteAttempts = useRef(0);
   const [playerReady, setPlayerReady] = useState(false);
   const activity = round.activity;
   const fixture = isFixtureVideo(activity?.videoId);
@@ -34,7 +35,8 @@ export function VideoCard({
   useEffect(() => {
     reportedUnavailable.current = false;
     setPlayerReady(false);
-    setAutoplayMuted(false);
+    setSoundBlocked(false);
+    unmuteAttempts.current = 0;
   }, [round.id, activity?.videoId]);
 
   useEffect(() => {
@@ -48,21 +50,24 @@ export function VideoCard({
       const data = event.data as {
         "x-tiktok-player"?: boolean;
         type?: string;
-        value?: { errorCode?: number; errorType?: string };
+        value?: boolean | { errorCode?: number; errorType?: string };
       } | undefined;
       if (!data?.["x-tiktok-player"]) return;
+      const errorValue = typeof data.value === "object" && data.value ? data.value : undefined;
 
       if (data.type === "onPlayerReady") {
         setPlayerReady(true);
         onReady?.(activity.videoId);
-        iframeRef.current?.contentWindow?.postMessage(
-          { type: "play", value: undefined, "x-tiktok-player": true },
-          "https://www.tiktok.com",
-        );
+        const target = iframeRef.current?.contentWindow;
+        // Unmuted is the default. TikTok supports explicit unMute + play host
+        // messages, so request sound before playback rather than deliberately
+        // falling back to muted playback.
+        target?.postMessage({ type: "unMute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+        target?.postMessage({ type: "play", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
         return;
       }
 
-      if (data.type === "onPlayerError" && data.value?.errorType === "INVALID_VIDEO") {
+      if (data.type === "onPlayerError" && errorValue?.errorType === "INVALID_VIDEO") {
         // TikTok documents INVALID_VIDEO (1001) as "Invalid Media ID, no
         // video/photo found". The iframe stays hidden and the server swaps this
         // round's activity before any player is allowed to guess.
@@ -73,13 +78,20 @@ export function VideoCard({
         return;
       }
 
-      if (data.type === "onPlayerError" && data.value?.errorType === "AUTOPLAY_ERROR") {
-        // Browsers commonly reject audible autoplay. Retry muted so the round
-        // still starts without requiring the player to press Play.
-        setAutoplayMuted(true);
-        const target = iframeRef.current?.contentWindow;
-        target?.postMessage({ type: "mute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
-        target?.postMessage({ type: "play", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+      if (data.type === "onMute" && data.value === true && unmuteAttempts.current < 2) {
+        unmuteAttempts.current += 1;
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: "unMute", value: undefined, "x-tiktok-player": true },
+          "https://www.tiktok.com",
+        );
+        return;
+      }
+
+      if (data.type === "onPlayerError" && errorValue?.errorType === "AUTOPLAY_ERROR") {
+        // Audible autoplay can be blocked by the browser itself. Do not silently
+        // switch to muted playback; preserve the user's requested sound-first
+        // behaviour and expose one user-gesture fallback instead.
+        setSoundBlocked(true);
       }
     };
     window.addEventListener("message", handleMessage);
@@ -115,7 +127,19 @@ export function VideoCard({
           referrerPolicy="strict-origin-when-cross-origin"
         />
       </div>
-      {autoplayMuted && playerReady && <p className="border-t border-white/8 px-4 py-2 text-center text-xs text-zinc-400">Your browser blocked autoplay with sound, so TikTok started muted. Use the player volume control to unmute.</p>}
+      {soundBlocked && playerReady && <div className="border-t border-white/8 px-4 py-3 text-center">
+        <button
+          type="button"
+          className="focus-ring rounded-xl bg-white px-4 py-2 text-sm font-black text-black"
+          onClick={() => {
+            const target = iframeRef.current?.contentWindow;
+            target?.postMessage({ type: "unMute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+            target?.postMessage({ type: "play", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+            setSoundBlocked(false);
+          }}
+        >Play with sound</button>
+        <p className="mt-2 text-xs text-zinc-500">Your browser blocked audible autoplay. One click enables sound without muting the round by default.</p>
+      </div>}
     </div>;
   }
 

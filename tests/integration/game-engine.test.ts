@@ -42,7 +42,7 @@ describe("GameEngine multiplayer flow", () => {
     state = await engine.getPublicState(room.code, ids[0]);
     expect(state.round?.status).toBe("REVEAL");
     expect(state.round?.correctUserIds).toContain(firstPrivateRound.sourceUserId);
-    expect(state.players.every((player) => player.score === 1)).toBe(true);
+    expect(state.players.every((player) => player.score === 1000)).toBe(true);
 
     for (let roundNumber = 2; roundNumber <= 5; roundNumber += 1) {
       nowMs += 4_100;
@@ -58,7 +58,7 @@ describe("GameEngine multiplayer flow", () => {
     nowMs += 4_100;
     state = await engine.getPublicState(room.code, ids[0]);
     expect(state.room.status).toBe("FINISHED");
-    expect(state.players.every((player) => player.score === 5)).toBe(true);
+    expect(state.players.every((player) => player.score === 5000)).toBe(true);
 
     await engine.createRematch(room.code, ids[0]);
     state = await engine.getPublicState(room.code, ids[0]);
@@ -128,8 +128,8 @@ describe("GameEngine multiplayer flow", () => {
     const state = await engine.getPublicState(room.code, ids[0]);
     expect(state.round?.status).toBe("REVEAL");
     expect(state.round?.correctUserIds?.sort()).toEqual([ids[0], ids[1]].sort());
-    expect(state.players.find((player) => player.userId === ids[0])?.score).toBe(1);
-    expect(state.players.find((player) => player.userId === ids[1])?.score).toBe(1);
+    expect(state.players.find((player) => player.userId === ids[0])?.score).toBe(1000);
+    expect(state.players.find((player) => player.userId === ids[1])?.score).toBe(1000);
   });
 
   it("supports unlimited rounds and majority end-round voting", async () => {
