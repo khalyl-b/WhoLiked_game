@@ -97,6 +97,7 @@ export interface PublicRound {
   roundNumber: number;
   status: RoundStatus;
   activity?: Pick<SocialActivity, "videoId" | "videoUrl" | "title" | "creator" | "thumbnailUrl" | "activityType">;
+  startedAt?: string;
   answerDeadline?: string;
   correctUserIds?: string[];
   correctDisplayNames?: string[];

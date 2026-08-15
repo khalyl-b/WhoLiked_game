@@ -1,9 +1,9 @@
 export const MAX_CORRECT_GUESS_POINTS = 1000;
-export const MIN_CORRECT_GUESS_POINTS = 100;
+export const MIN_CORRECT_GUESS_POINTS = 500;
 
 /**
  * Correct timed guesses decay linearly from 1000 points at round start to
- * 100 points immediately before the deadline. Unlimited rounds have no time
+ * 500 points immediately before the deadline. Unlimited rounds have no time
  * pressure, so a correct answer is worth the full 1000 points.
  */
 export function calculateCorrectGuessPoints({

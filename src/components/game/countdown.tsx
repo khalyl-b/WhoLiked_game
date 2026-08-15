@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { calculateDisplayedPotentialPoints, MAX_CORRECT_GUESS_POINTS } from "@/features/game/scoring";
 
-export function Countdown({ deadline, serverTime, durationSeconds }: { deadline?: string; serverTime: string; durationSeconds: number }) {
+export function Countdown({ startedAt, deadline, serverTime, durationSeconds }: { startedAt?: string; deadline?: string; serverTime: string; durationSeconds: number }) {
   const offset = useMemo(() => new Date(serverTime).getTime() - Date.now(), [serverTime]);
   const [remaining, setRemaining] = useState(() => deadline ? Math.max(0, new Date(deadline).getTime() - (Date.now() + offset)) : 0);
 
@@ -14,6 +14,13 @@ export function Countdown({ deadline, serverTime, durationSeconds }: { deadline?
     const timer = window.setInterval(update, 50);
     return () => window.clearInterval(timer);
   }, [deadline, offset]);
+
+  if (!startedAt) {
+    return <div aria-live="polite" className="rounded-2xl bg-white/8 px-4 py-2 text-center">
+      <div className="text-sm font-black">Waiting</div>
+      <div className="text-xs font-bold text-cyan-300">{MAX_CORRECT_GUESS_POINTS} pts</div>
+    </div>;
+  }
 
   if (!deadline) {
     return <div aria-live="polite" className="rounded-2xl bg-white/8 px-4 py-2 text-center">

@@ -65,7 +65,7 @@ export function RoomClient({ code }: { code: string }) {
   return <main className="shell py-5 sm:py-8">
     <ConnectionBanner show={reconnecting} />
     <div className="mx-auto max-w-3xl">
-      <header className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-zinc-500">Round</p><p className="text-xl font-black">{round.roundNumber} / {state.room.settings.roundCount}</p></div>{!revealing && <Countdown deadline={round.answerDeadline} serverTime={state.serverTime} durationSeconds={state.room.settings.guessDurationSeconds} />}</header>
+      <header className="mb-4 flex items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-zinc-500">Round</p><p className="text-xl font-black">{round.roundNumber} / {state.room.settings.roundCount}</p></div>{!revealing && <Countdown startedAt={round.startedAt} deadline={round.answerDeadline} serverTime={state.serverTime} durationSeconds={state.room.settings.guessDurationSeconds} />}</header>
       <AnimatePresence mode="wait">
         {revealing ? <motion.section key={`reveal-${round.id}`} initial={{ opacity: 0, scale: .96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
           <div className="panel p-6 text-center sm:p-8"><p className="text-sm font-bold uppercase tracking-[.18em] text-zinc-500">{round.activity?.activityType === "REPOST" ? "Reposted by…" : "Liked by…"}</p><h1 className="mt-2 text-4xl font-black text-cyan-300 sm:text-6xl">{formatAnswerNames(round.correctDisplayNames ?? [])}</h1>
@@ -81,12 +81,15 @@ export function RoomClient({ code }: { code: string }) {
             round={round}
             replacing={busyAction === "unavailable"}
             onReady={(videoId) => setReadyVideoId(videoId)}
+            onPlaying={(roundId, videoId) => {
+              void run("playback-start", { roundId, videoId });
+            }}
             onUnavailable={(roundId, videoId) => {
               setReadyVideoId("");
               void run("unavailable", { roundId, videoId });
             }}
           />
-          {readyVideoId === round.activity?.videoId ? <>
+          {readyVideoId === round.activity?.videoId && round.startedAt ? <>
             <h1 className="mt-6 text-center text-2xl font-black sm:text-3xl">{round.activity?.activityType === "REPOST" ? "Who reposted this?" : "Who liked this?"}</h1>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">{state.players.map((player) => {
               const locked = !!state.viewerGuess;
@@ -106,7 +109,7 @@ export function RoomClient({ code }: { code: string }) {
                 {state.endRoundVoteCount ?? 0}/{state.endRoundVotesRequired ?? (Math.floor(state.players.length / 2) + 1)} votes · more than 50% ends the round
               </p>
             </div>
-          </> : <p className="mt-4 text-center text-sm text-zinc-500">Checking that this TikTok is playable before guesses open…</p>}
+          </> : <p className="mt-4 text-center text-sm text-zinc-500">{readyVideoId === round.activity?.videoId ? "Waiting for everyone’s TikTok to start playing…" : "Checking that this TikTok is playable before guesses open…"}</p>}
         </motion.section>}
       </AnimatePresence>
       {host && state.room.status === "ACTIVE" && <div className="mt-6 flex justify-center gap-3"><Button variant="secondary" disabled={!!busyAction} onClick={() => void run("skip")}>Skip round</Button><Button variant="danger" disabled={!!busyAction} onClick={() => void run("end")}>End game</Button></div>}

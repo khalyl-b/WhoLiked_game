@@ -7,6 +7,7 @@ export interface GameService {
   startGame(code: string, actorUserId: string): Promise<void>;
   submitGuess(code: string, actorUserId: string, guessedUserId: string): Promise<unknown>;
   voteToEndRound(code: string, actorUserId: string): Promise<unknown>;
+  reportRoundPlaybackStarted(code: string, actorUserId: string, roundId: string, videoId: string): Promise<unknown>;
   reportUnavailableRound(code: string, actorUserId: string, roundId: string, videoId: string): Promise<unknown>;
   skipRound(code: string, actorUserId: string): Promise<void>;
   endGame(code: string, actorUserId: string): Promise<void>;

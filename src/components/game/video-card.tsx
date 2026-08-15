@@ -15,16 +15,19 @@ function embedUrl(videoId: string | undefined) {
 export function VideoCard({
   round,
   onReady,
+  onPlaying,
   onUnavailable,
   replacing = false,
 }: {
   round: PublicRound;
   onReady?: (videoId: string) => void;
+  onPlaying?: (roundId: string, videoId: string) => void;
   onUnavailable?: (roundId: string, videoId: string) => void;
   replacing?: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const reportedUnavailable = useRef(false);
+  const reportedPlaying = useRef(false);
   const [soundBlocked, setSoundBlocked] = useState(false);
   const unmuteAttempts = useRef(0);
   const [playerReady, setPlayerReady] = useState(false);
@@ -34,14 +37,21 @@ export function VideoCard({
 
   useEffect(() => {
     reportedUnavailable.current = false;
+    reportedPlaying.current = false;
     setPlayerReady(false);
     setSoundBlocked(false);
     unmuteAttempts.current = 0;
   }, [round.id, activity?.videoId]);
 
   useEffect(() => {
-    if (fixture && activity?.videoId) onReady?.(activity.videoId);
-  }, [fixture, activity?.videoId, onReady]);
+    if (fixture && activity?.videoId) {
+      onReady?.(activity.videoId);
+      if (!reportedPlaying.current) {
+        reportedPlaying.current = true;
+        onPlaying?.(round.id, activity.videoId);
+      }
+    }
+  }, [fixture, round.id, activity?.videoId, onReady, onPlaying]);
 
   useEffect(() => {
     if (!playerUrl || !activity?.videoId) return;
@@ -50,7 +60,7 @@ export function VideoCard({
       const data = event.data as {
         "x-tiktok-player"?: boolean;
         type?: string;
-        value?: boolean | { errorCode?: number; errorType?: string };
+        value?: boolean | number | { errorCode?: number; errorType?: string };
       } | undefined;
       if (!data?.["x-tiktok-player"]) return;
       const errorValue = typeof data.value === "object" && data.value ? data.value : undefined;
@@ -59,11 +69,20 @@ export function VideoCard({
         setPlayerReady(true);
         onReady?.(activity.videoId);
         const target = iframeRef.current?.contentWindow;
-        // Unmuted is the default. TikTok supports explicit unMute + play host
-        // messages, so request sound before playback rather than deliberately
-        // falling back to muted playback.
-        target?.postMessage({ type: "unMute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+        // Pre-roll invisibly and silently so every client can prove that the
+        // TikTok has actually entered PLAYING before the shared round timer
+        // begins. Once the server starts the round, a separate effect unmutes
+        // and keeps playback running for the visible guessing phase.
+        target?.postMessage({ type: "mute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
         target?.postMessage({ type: "play", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+        return;
+      }
+
+      if (data.type === "onStateChange" && data.value === 1) {
+        if (!reportedPlaying.current) {
+          reportedPlaying.current = true;
+          onPlaying?.(round.id, activity.videoId);
+        }
         return;
       }
 
@@ -78,12 +97,16 @@ export function VideoCard({
         return;
       }
 
-      if (data.type === "onMute" && data.value === true && unmuteAttempts.current < 2) {
-        unmuteAttempts.current += 1;
-        iframeRef.current?.contentWindow?.postMessage(
-          { type: "unMute", value: undefined, "x-tiktok-player": true },
-          "https://www.tiktok.com",
-        );
+      if (data.type === "onMute" && data.value === true && round.startedAt) {
+        if (unmuteAttempts.current < 2) {
+          unmuteAttempts.current += 1;
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: "unMute", value: undefined, "x-tiktok-player": true },
+            "https://www.tiktok.com",
+          );
+        } else {
+          setSoundBlocked(true);
+        }
         return;
       }
 
@@ -96,7 +119,14 @@ export function VideoCard({
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [playerUrl, round.id, activity?.videoId, onReady, onUnavailable]);
+  }, [playerUrl, round.id, round.startedAt, activity?.videoId, onReady, onPlaying, onUnavailable]);
+
+  useEffect(() => {
+    if (!playerUrl || !playerReady || !round.startedAt) return;
+    const target = iframeRef.current?.contentWindow;
+    target?.postMessage({ type: "unMute", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+    target?.postMessage({ type: "play", value: undefined, "x-tiktok-player": true }, "https://www.tiktok.com");
+  }, [playerUrl, playerReady, round.startedAt]);
 
   if (playerUrl) {
     return <div className="panel overflow-hidden">
@@ -110,15 +140,15 @@ export function VideoCard({
         >Open on TikTok ↗</a>
       </div>
       <div className="relative mx-auto w-full max-w-[430px] bg-black">
-        {!playerReady && <div className="absolute inset-0 z-10 flex aspect-[9/16] items-center justify-center bg-zinc-950 px-6 text-center">
+        {(!playerReady || !round.startedAt) && <div className="absolute inset-0 z-10 flex aspect-[9/16] items-center justify-center bg-zinc-950 px-6 text-center">
           <div>
-            <p className="text-sm font-black uppercase tracking-[0.16em] text-cyan-300">{replacing ? "Replacing unavailable TikTok" : "Checking TikTok"}</p>
-            <p className="mt-2 text-sm text-zinc-400">{replacing ? "Finding another playable video…" : "The round will appear as soon as TikTok confirms the video can load."}</p>
+            <p className="text-sm font-black uppercase tracking-[0.16em] text-cyan-300">{replacing ? "Replacing unavailable TikTok" : !playerReady ? "Checking TikTok" : "Synchronising round"}</p>
+            <p className="mt-2 text-sm text-zinc-400">{replacing ? "Finding another playable video…" : !playerReady ? "The round will appear as soon as TikTok confirms the video can load." : "The timer starts only after every player’s TikTok is actually playing."}</p>
           </div>
         </div>}
         <iframe
           ref={iframeRef}
-          className={`aspect-[9/16] w-full border-0 transition-opacity ${playerReady ? "opacity-100" : "opacity-0"}`}
+          className={`aspect-[9/16] w-full border-0 transition-opacity ${playerReady && round.startedAt ? "opacity-100" : "opacity-0"}`}
           src={playerUrl}
           title="TikTok for the current guessing round"
           loading="eager"

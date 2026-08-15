@@ -226,6 +226,7 @@ export class SupabaseGameEngine implements GameService {
           thumbnailUrl: activity.thumbnailUrl,
           activityType: activity.activityType,
         } : undefined,
+        startedAt: round.startedAt,
         answerDeadline: round.answerDeadline,
         ...(reveal && activity ? await (async () => {
           const correctUserIds = await this.correctOwnerIdsForActivity(room.id, round.activityId);
@@ -352,6 +353,18 @@ export class SupabaseGameEngine implements GameService {
     const { data, error } = await this.db().rpc("vote_to_end_current_round", {
       p_room_id: room.id,
       p_actor_user_id: actorUserId,
+    });
+    if (error) throw this.rpcError(error);
+    return data;
+  }
+
+  async reportRoundPlaybackStarted(code: string, actorUserId: string, roundId: string, videoId: string) {
+    const room = await this.requireRoomByCode(code);
+    const { data, error } = await this.db().rpc("report_round_playback_started", {
+      p_room_id: room.id,
+      p_actor_user_id: actorUserId,
+      p_round_id: roundId,
+      p_video_id: videoId,
     });
     if (error) throw this.rpcError(error);
     return data;
@@ -724,7 +737,7 @@ export class SupabaseGameEngine implements GameService {
 
   private rpcError(error: { message?: string; code?: string }) {
     const message = error.message ?? "Game operation failed.";
-    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET|ALREADY_VOTED)/)?.[1];
+    const code = message.match(/(ROOM_NOT_FOUND|ROOM_FULL|ROOM_CLOSED|NOT_IN_ROOM|INVALID_GUESSED_PLAYER|HOST_ONLY|INVALID_STATE|ROUND_NOT_FOUND|ROUND_CLOSED|DEADLINE_PASSED|DUPLICATE_GUESS|PLAYER_SET_CHANGED|INSUFFICIENT_ACTIVITY|INVALID_TARGET|ALREADY_VOTED|ROUND_NOT_STARTED)/)?.[1];
     const status = code === "ROOM_NOT_FOUND" || code === "ROUND_NOT_FOUND" ? 404
       : code === "NOT_IN_ROOM" || code === "HOST_ONLY" ? 403
       : 409;
