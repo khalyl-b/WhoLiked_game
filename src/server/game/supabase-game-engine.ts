@@ -176,12 +176,19 @@ export class SupabaseGameEngine implements GameService {
     const players = await this.activeRoomPlayers(room.id);
     const users = await this.usersByIds(players.map((player) => player.userId));
 
-    let eligible = new Map<string, SocialActivity[]>();
-    let validation: ReturnType<typeof validateActivityCapacity> | null = null;
+    // Lobby readiness only needs per-player counts. Fetching every player's full
+    // activity in one PostgREST query is incorrect because Supabase row-returning
+    // queries are capped (commonly at 1,000 rows), allowing one large account to
+    // consume the whole response and make later players appear to have zero videos.
+    let lobbyActivityCounts = new Map<string, number>();
+    let lobbyShortages: Array<{ userId: string; eligible: number; required: number }> = [];
     if (room.status === "LOBBY") {
-      const activityByUser = await this.activityByPlayer(players.map((player) => player.userId), room.settings.activityTypes);
-      eligible = uniqueOwnerActivities(activityByUser);
-      validation = validateActivityCapacity(players.map((player) => player.userId), room.settings.roundCount, activityByUser);
+      lobbyActivityCounts = await this.activityCountsByPlayer(players.map((player) => player.userId), room.settings.activityTypes);
+      // Under the current MVP limits (2-10 players, max 20 rounds), no player can
+      // own more than 10 rounds, and the product already requires at least 10 items.
+      lobbyShortages = players
+        .map((player) => ({ userId: player.userId, eligible: lobbyActivityCounts.get(player.userId) ?? 0, required: 10 }))
+        .filter((item) => item.eligible < item.required);
     }
 
     const publicPlayers = players
@@ -193,7 +200,7 @@ export class SupabaseGameEngine implements GameService {
         ready: player.ready,
         connected: player.connected,
         isHost: room.hostUserId === player.userId,
-        eligibleActivityCount: eligible.get(player.userId)?.length ?? 0,
+        eligibleActivityCount: lobbyActivityCounts.get(player.userId) ?? 0,
       }));
 
     const round = await this.currentRound(room);
@@ -235,8 +242,8 @@ export class SupabaseGameEngine implements GameService {
     let startBlockReason: string | undefined;
     if (room.status === "LOBBY") {
       if (players.length < MIN_PLAYERS) startBlockReason = "At least 2 players are required.";
-      else if (validation && !validation.ok) {
-        const first = validation.shortages[0];
+      else if (lobbyShortages.length > 0) {
+        const first = lobbyShortages[0];
         const name = users.get(first.userId)?.displayName ?? "A player";
         startBlockReason = `${name} has ${first.eligible}/${first.required} eligible videos.`;
       }
@@ -429,23 +436,58 @@ export class SupabaseGameEngine implements GameService {
     return ((data ?? []) as unknown[]).map((row: unknown) => this.mapRoomPlayer(row as RoomPlayerRow));
   }
 
+  private async activityCountsByPlayer(playerIds: string[], activityTypes: ActivityType[]) {
+    const counts = new Map(playerIds.map((id) => [id, 0]));
+    const excludeFixtures = (process.env.SOCIAL_ACTIVITY_PROVIDER ?? "fake").toLowerCase() === "tiktok";
+
+    await Promise.all(playerIds.map(async (userId) => {
+      let query = this.db()
+        .from("social_activity")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("available", true)
+        .in("activity_type", activityTypes);
+      if (excludeFixtures) query = query.neq("import_source", "fixture");
+      const { count, error } = await query;
+      if (error) throw this.databaseError(error, "Could not count social activity.");
+      counts.set(userId, count ?? 0);
+    }));
+
+    return counts;
+  }
+
   private async activityByPlayer(playerIds: string[], activityTypes: ActivityType[]) {
-    if (playerIds.length === 0) return new Map<string, SocialActivity[]>();
-    let query = this.db()
-      .from("social_activity")
-      .select("*")
-      .in("user_id", playerIds)
-      .in("activity_type", activityTypes);
-    if ((process.env.SOCIAL_ACTIVITY_PROVIDER ?? "fake").toLowerCase() === "tiktok") {
-      query = query.neq("import_source", "fixture");
-    }
-    const { data, error } = await query;
-    if (error) throw this.databaseError(error, "Could not load social activity.");
     const grouped = new Map(playerIds.map((id) => [id, [] as SocialActivity[]]));
-    for (const row of (data ?? []) as unknown[]) {
-      const activity = this.mapActivity(row as ActivityRow);
-      grouped.get(activity.userId)?.push(activity);
-    }
+    if (playerIds.length === 0) return grouped;
+
+    const pageSize = 1000;
+    const excludeFixtures = (process.env.SOCIAL_ACTIVITY_PROVIDER ?? "fake").toLowerCase() === "tiktok";
+
+    // Fetch each player's activity independently and page through the complete
+    // result set. This is used when starting a game, where we need the full pool
+    // to correctly exclude videos liked by more than one room member.
+    await Promise.all(playerIds.map(async (userId) => {
+      let from = 0;
+      while (true) {
+        let query = this.db()
+          .from("social_activity")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("available", true)
+          .in("activity_type", activityTypes)
+          .order("imported_at", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (excludeFixtures) query = query.neq("import_source", "fixture");
+
+        const { data, error } = await query;
+        if (error) throw this.databaseError(error, "Could not load social activity.");
+        const rows = (data ?? []) as unknown[];
+        for (const row of rows) grouped.get(userId)?.push(this.mapActivity(row as ActivityRow));
+        if (rows.length < pageSize) break;
+        from += pageSize;
+      }
+    }));
+
     return grouped;
   }
 
