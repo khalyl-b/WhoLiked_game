@@ -1,0 +1,5 @@
+After copying these replacement files into your existing project, delete this old folder if it still exists:
+
+src/app/api/rooms/[code]/playback-start/
+
+It belonged to the removed playback synchronisation system and is no longer used.
